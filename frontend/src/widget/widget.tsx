@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import i18n from "../i18n.js";
+import { generateId } from "../utils/generateId.js";
 
 import chatbotClosedLogo from "../assets/2026-05-29_APP_M+_PICTO_GEBOT_PICT_BOT_LOGO_1880x512.svg";
 import chatbotOpenLogo from "../assets/2026-05-29_APP_M+_PICTO_GEBOT_PICT_BOT_GEN_512x512.svg";
@@ -131,7 +132,7 @@ function getOrCreateSessionId(): string {
   const key = "gebot_session_id";
   const existing = window.localStorage.getItem(key);
   if (existing) return existing;
-  const next = crypto.randomUUID();
+  const next = generateId();
   window.localStorage.setItem(key, next);
   return next;
 }
