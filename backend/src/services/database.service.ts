@@ -202,14 +202,29 @@ export async function logQuery(params: {
   if (!isSchemaMismatch(error)) throw error;
   console.warn("[/api/chat] chat_queries schema mismatch:", (error as { message?: string }).message ?? error);
 
-  const fallbackPayloads = [
-    { session_id: params.sessionId, query: params.query, response_ms: params.responseMs, status: params.status },
-    { session_id: params.sessionId, query: params.query, status: params.status },
-    { session_id: params.sessionId, query: params.query },
+  const fallbackAttempts = [
+    () =>
+      supabase.from("chat_queries").insert({
+        session_id: params.sessionId,
+        query: params.query,
+        response_ms: params.responseMs,
+        status: params.status,
+      }),
+    () =>
+      supabase.from("chat_queries").insert({
+        session_id: params.sessionId,
+        query: params.query,
+        status: params.status,
+      }),
+    () =>
+      supabase.from("chat_queries").insert({
+        session_id: params.sessionId,
+        query: params.query,
+      }),
   ];
 
-  for (const fallbackPayload of fallbackPayloads) {
-    const { error: fallbackError } = await supabase.from("chat_queries").insert(fallbackPayload);
+  for (const attempt of fallbackAttempts) {
+    const { error: fallbackError } = await attempt();
     if (!fallbackError) return;
     if (!isSchemaMismatch(fallbackError)) throw fallbackError;
   }
