@@ -1,0 +1,48 @@
+{
+  "name": "gebot-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "ingest": "tsx src/scripts/ingest.ts",
+    "migrate-themes": "tsx src/scripts/migrate-themes.ts",
+    "synthesize-products": "tsx src/scripts/synthesize-products.ts",
+    "retrieval-regression": "tsx src/scripts/run-retrieval-regression.ts",
+    "export-feedback": "tsx src/scripts/export-feedback.ts",
+    "apply-catalog-feedback": "tsx src/scripts/apply-catalog-feedback.ts",
+    "scrape": "tsx src/scripts/scrape-products.ts",
+    "audit-catalog-themes": "tsx src/scripts/audit-catalog-themes.ts",
+    "realign-catalog-themes": "tsx src/scripts/realign-catalog-themes.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@llamaindex/mistral": "^0.1.22",
+    "@llamaindex/supabase": "^0.1.23",
+    "@supabase/supabase-js": "^2.101.1",
+    "axios": "^1.15.0",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.0",
+    "express": "^5.2.1",
+    "html-to-text": "^9.0.5",
+    "llamaindex": "^0.12.1",
+    "pdf-parse": "^2.4.5",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/html-to-text": "^9.0.4",
+    "@types/node": "^24.12.0",
+    "@types/pdf-parse": "^1.1.5",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

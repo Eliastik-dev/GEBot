@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.local
+backend/.env
+frontend/.env
+.env
+supabase/
