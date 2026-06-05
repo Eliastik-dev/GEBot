@@ -1,0 +1,70 @@
+# GEBot — Nginx reverse proxy template (internal Ubuntu VM)
+#
+# 1. Replace placeholders below, then copy to Nginx sites-available:
+#      sudo cp nginx.conf.template /etc/nginx/sites-available/gebot
+#      sudo ln -sf /etc/nginx/sites-available/gebot /etc/nginx/sites-enabled/gebot
+#      sudo nginx -t && sudo systemctl reload nginx
+#
+# 2. Placeholders:
+#      __SERVER_NAME__   — VM hostname or IP (e.g. gebot-vm.local or 192.168.1.50)
+#      __DEPLOY_ROOT__   — Absolute path to the cloned repo (e.g. /home/deploy/GEBot)
+#      __BACKEND_PORT__  — Must match PORT in your .env (default: 8787)
+
+server {
+    listen 80;
+    server_name __SERVER_NAME__;
+
+    # Compiled widget JS + generated test interface (deploy_ubuntu.sh writes index.html)
+    root __DEPLOY_ROOT__/frontend/dist;
+    index index.html;
+
+    # Security headers (adjust as needed for your internal network)
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+
+    # Backend health endpoint
+    location = /health {
+        proxy_pass http://127.0.0.1:__BACKEND_PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # All API traffic → Express backend
+    location /api/ {
+        proxy_pass http://127.0.0.1:__BACKEND_PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Required for /api/chat Server-Sent Events (streaming responses)
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        chunked_transfer_encoding on;
+    }
+
+    # Widget bundle — short cache; bump after each deploy if clients cache aggressively
+    location = /gebot-widget.js {
+        add_header Cache-Control "public, max-age=300";
+        try_files $uri =404;
+    }
+
+    location = /gebot-widget.js.map {
+        add_header Cache-Control "public, max-age=300";
+        try_files $uri =404;
+    }
+
+    # Internal test interface
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    access_log /var/log/nginx/gebot-access.log;
+    error_log  /var/log/nginx/gebot-error.log warn;
+}
