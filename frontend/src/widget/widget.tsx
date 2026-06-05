@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import i18n from "../i18n.js";
 
+import chatbotClosedLogo from "../assets/2026-05-29_APP_M+_PICTO_GEBOT_PICT_BOT_LOGO_1880x512.svg";
+import chatbotOpenLogo from "../assets/2026-05-29_APP_M+_PICTO_GEBOT_PICT_BOT_GEN_512x512.svg";
+
 type Props = {
   apiBaseUrl: string;
 };
@@ -58,8 +61,8 @@ function clearGebotEphemeralLocalStorage(): void {
 
 clearGebotEphemeralLocalStorage();
 
-const chatbotClosedLogo = new URL("../assets/2026-05-29_APP_M+_PICTO_GEBOT_PICT_BOT_LOGO_1880x512.svg", import.meta.url).href;
-const chatbotOpenLogo = new URL("../assets/2026-05-29_APP_M+_PICTO_GEBOT_PICT_BOT_GEN_512x512.svg", import.meta.url).href;
+/* const chatbotClosedLogo = new URL("../assets/2026-05-29_APP_M+_PICTO_GEBOT_PICT_BOT_LOGO_1880x512.svg", import.meta.url).href;
+const chatbotOpenLogo = new URL("../assets/2026-05-29_APP_M+_PICTO_GEBOT_PICT_BOT_GEN_512x512.svg", import.meta.url).href; */
 
 async function streamChat(
   apiBaseUrl: string,

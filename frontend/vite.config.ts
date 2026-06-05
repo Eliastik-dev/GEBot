@@ -19,6 +19,7 @@ export default defineConfig({
   build: {
     sourcemap: true,
     cssCodeSplit: false,
+    assetsInlineLimit: 100_000_000,
     rollupOptions: {
       input: "src/widget-entry.tsx",
       output: {
