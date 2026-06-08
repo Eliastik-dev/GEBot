@@ -50,6 +50,13 @@ server {
         chunked_transfer_encoding on;
     }
 
+    # Avoid 500 when favicon.ico is missing (browser default request)
+    location = /favicon.ico {
+        log_not_found off;
+        access_log off;
+        return 204;
+    }
+
     # Widget bundle — short cache; bump after each deploy if clients cache aggressively
     location = /gebot-widget.js {
         add_header Cache-Control "public, max-age=300";

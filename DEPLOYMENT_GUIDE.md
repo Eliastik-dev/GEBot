@@ -281,6 +281,8 @@ sudo systemctl reload nginx   # if Nginx serves the widget
 
 | Symptom | Check |
 |---------|-------|
+| `403 Forbidden` on `/` but `/gebot-widget.js` works | `frontend/dist/index.html` missing — run `npm run build --prefix frontend` (build now copies the test page automatically), then reload Nginx |
+| `500` on `/favicon.ico` | Harmless before deploy; fixed in `nginx.conf.template` (`return 204`). Reload Nginx after updating the config |
 | Deploy aborts immediately | `.env` missing — create it at root or `backend/.env` |
 | `Missing required env var` in PM2 logs | Required keys absent from `.env` (`MISTRAL_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `WP_URL`) |
 | `502 Bad Gateway` from Nginx | `pm2 status` — is `gebot-backend` online? Does `PORT` in `.env` match `__BACKEND_PORT__` in Nginx? |

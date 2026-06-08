@@ -127,34 +127,7 @@ npm install --prefix frontend
 log "Building frontend widget..."
 npm run build --prefix frontend
 
-log "Generating internal test interface (frontend/dist/index.html)..."
-cat > frontend/dist/index.html <<'EOF'
-<!doctype html>
-<html lang="fr">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GEBot — Interface de test interne</title>
-    <style>
-      html, body { margin: 0; min-height: 100vh; font-family: system-ui, sans-serif; background: #f4f6f8; }
-    </style>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script src="/gebot-widget.js"></script>
-    <script>
-      (function () {
-        var root = document.getElementById("root");
-        if (!root || !window.GEBOT_WIDGET) return;
-        window.GEBOT_WIDGET.mount({
-          target: root,
-          apiBaseUrl: "",
-        });
-      })();
-    </script>
-  </body>
-</html>
-EOF
+log "Test page (frontend/dist/index.html) is produced by npm run build --prefix frontend"
 
 # ---------------------------------------------------------------------------
 # 7. Build backend
