@@ -254,12 +254,26 @@ Example healthy response:
 ```json
 {
   "ok": true,
-  "commit": "56a0e18",
-  "builtAt": "2026-06-08T14:30:00+02:00",
+  "commit": "60e5058",
+  "builtAt": "2026-06-08T16:35:21+02:00",
+  "port": 8787,
   "supabase": true,
   "productKnowledgeFr": 217,
-  "productKnowledgeEnabled": true
+  "productKnowledgeEnabled": true,
+  "catalogReady": true,
+  "retrieval": {
+    "version": "2026-06-08-direct-sheet-citation",
+    "g110InCatalog": true,
+    "g110SheetLookup": "g110-inhibiteur-universel"
+  }
 }
+```
+
+Or run the automated checker after deploy:
+
+```bash
+chmod +x scripts/verify-deploy.sh
+./scripts/verify-deploy.sh
 ```
 
 | Field | Meaning |
@@ -267,6 +281,8 @@ Example healthy response:
 | `commit` | Git revision actually deployed (must match `git log -1 --oneline` on the VM) |
 | `supabase` | `false` → wrong URL/key or network issue; chat may work but sessions/feedback fail |
 | `productKnowledgeFr` | `0` or `null` → catalog empty; responses are slower and less accurate (vector-only fallback) |
+| `catalogReady` | `false` → direct G110 / fiche technique shortcuts are disabled |
+| `retrieval.g110SheetLookup` | Must be `g110-inhibiteur-universel` when catalog is populated |
 
 Rebuild the **frontend widget** too when UI changes (thumbs up/down live in `gebot-widget.js`):
 
@@ -288,6 +304,9 @@ sudo systemctl reload nginx   # if Nginx serves the widget
 | `502 Bad Gateway` from Nginx | `pm2 status` — is `gebot-backend` online? Does `PORT` in `.env` match `__BACKEND_PORT__` in Nginx? |
 | Widget loads but chat fails | Browser devtools → Network → `/api/chat` response; check `pm2 logs gebot-backend` |
 | Fixes on GitHub but not on server | You likely ran `git pull` only — run `./deploy_ubuntu.sh` and check `curl /health` commit hash |
+| `pm2 restart all` used before deploy | Restarts old compiled code without rebuild; use `./deploy_ubuntu.sh` only |
+| Direct `/health` OK but site still wrong | Nginx not reloaded or proxies to another port/app — compare `curl 127.0.0.1:8787/health` vs `curl http://gebot.pn2.geb/health` |
+| `productKnowledgeFr: 0` | Catalog empty on this Supabase project — run `npm run synthesize-products --prefix backend` on the VM |
 | No thumbs up/down on answers | Rebuild frontend widget; backend must send `messageId` in SSE `done` event; Supabase must accept inserts |
 | Slow responses | Check `/health` → `productKnowledgeFr` (should be ~200+); empty catalog forces heavy vector RAG + LLM |
 | `git pull` authentication error | Re-run `ssh -T git@github.com`; verify deploy key on GitHub |

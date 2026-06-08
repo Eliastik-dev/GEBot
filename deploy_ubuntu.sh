@@ -241,3 +241,11 @@ echo ""
 echo "  pm2 status"
 echo "  pm2 logs ${APP_NAME}"
 echo ""
+warn "Do NOT use 'pm2 restart all' for GEBot updates — it skips rebuild and may restart unrelated apps."
+warn "Always use: ./deploy_ubuntu.sh  (or: git pull && ./deploy_ubuntu.sh)"
+echo ""
+
+if [[ -x "${SCRIPT_DIR}/scripts/verify-deploy.sh" ]]; then
+  log "Running post-deploy verification..."
+  "${SCRIPT_DIR}/scripts/verify-deploy.sh" || warn "verify-deploy.sh reported issues — see output above"
+fi
