@@ -1,7 +1,8 @@
 import { COMPLEMENTARY_HINTS } from "../config/constants.js";
 import type { Audience, HandoffPayload, Locale, Reseller } from "../types/index.js";
+import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { detectTheme } from "./locale.js";
-import { normalizeText } from "./text.js";
+import { decodeHtmlEntities, normalizeText } from "./text.js";
 
 export function buildHandoff(locale: Locale, audience: Audience | null): HandoffPayload {
   if (!audience) return null;
@@ -263,6 +264,70 @@ export function isResellerIntent(message: string): boolean {
     normalized.includes("winkel") ||
     normalized.includes("sklep")
   );
+}
+
+/** Deterministic MODE 2 answer when a technical sheet was explicitly requested and matched in catalogue. */
+export function buildDirectTechnicalSheetReply(locale: Locale, product: ProductKnowledgeRow): string {
+  const name = decodeHtmlEntities(product.canonical_name).trim();
+  const summary =
+    product.summary_technical?.trim() ||
+    (locale === "en"
+      ? "GEB catalogue product."
+      : locale === "nl"
+        ? "GEB-catalogusproduct."
+        : locale === "pl"
+          ? "Produkt z katalogu GEB."
+          : "Produit du catalogue GEB.");
+  const ftLine = product.ft_url
+    ? `- [Fiche Technique](${product.ft_url})`
+    : locale === "en"
+      ? "- Technical sheet: Not specified in the catalogue record"
+      : "- Fiche technique : Non précisé dans la fiche";
+  const fdsLine = product.fds_url
+    ? `- [Fiche de Données de Sécurité (FDS)](${product.fds_url})`
+    : locale === "en"
+      ? "- SDS: Not specified in the catalogue record"
+      : "- FDS : Non précisé dans la fiche";
+
+  if (locale === "en") {
+    return `Here is the technical sheet for **${name}**.
+
+### 📦 Recommended Product: **${name}**
+- **Description:** ${summary}
+
+### 📄 Official Documentation
+${ftLine}
+${fdsLine}`;
+  }
+  if (locale === "nl") {
+    return `Hier is de technische fiche van **${name}**.
+
+### 📦 Aanbevolen product: **${name}**
+- **Beschrijving:** ${summary}
+
+### 📄 Officiële documentatie
+${ftLine}
+${fdsLine}`;
+  }
+  if (locale === "pl") {
+    return `Oto karta techniczna produktu **${name}**.
+
+### 📦 Rekomendowany produkt: **${name}**
+- **Opis:** ${summary}
+
+### 📄 Dokumentacja oficialna
+${ftLine}
+${fdsLine}`;
+  }
+
+  return `Voici la fiche technique du **${name}**.
+
+### 📦 Produit Recommandé : **${name}**
+- **Description :** ${summary}
+
+### 📄 Documentation Officielle
+${ftLine}
+${fdsLine}`;
 }
 
 /** Strip purchase / store / documentation blocks when no product could be recommended. */

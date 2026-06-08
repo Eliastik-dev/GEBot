@@ -17,7 +17,8 @@ import { ensureSession, getSessionTheme, loadRecentMessages, logProblemEvent, lo
 import { scheduleJudgeEvaluation, type JudgeInput } from "../services/judge.service.js";
 import { buildSearchQuery, buildThemeAwareSearchQuery, capContextNodes, enrichRetrievalQuery, extractSourceUrlsFromNodes, getCachedResellers, mergeRetrievalNodes, prioritizeTechnicalSheets, summarizeNodeForDebug, AUTOMOTIVE_EXHAUST_SUPPLEMENT_QUERY } from "../services/rag.service.js";
 import { hasDescalingContext, isBuildingEnvelopeLeakContext, isPersonalDrinkwareOutOfCatalog } from "../utils/diagnostic-rules.js";
-import { countProductKnowledge, searchProductKnowledge } from "../services/product-knowledge.service.js";
+import { countProductKnowledge, lookupCatalogProductsByCitation, lookupExplicitCatalogProductForSheet, searchProductKnowledge } from "../services/product-knowledge.service.js";
+import { deliverDirectTechnicalSheetTurn } from "../services/direct-sheet.service.js";
 import {
   buildRetrieverNodesFromProductKnowledge,
   productKnowledgeLocale,
@@ -25,10 +26,12 @@ import {
   summarizeProductKnowledgeForDebug,
 } from "../services/product-router.service.js";
 import type { Audience, ChatRequestBody, Locale, ProductTheme, Reseller } from "../types/index.js";
+import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { fireAndForget, withTimeout } from "../utils/async.js";
 import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection } from "../utils/amazon.js";
 import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, normalizeAudience, normalizeLocale } from "../utils/locale.js";
-import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildEscalationSection, buildHandoff, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
+import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectTechnicalSheetReply, buildEscalationSection, buildHandoff, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
+import { formatNamedProductCitationPrompt, hasNamedProductCitation, isExplicitProductLookupQuery, resolveDirectTechnicalSheetProduct } from "../utils/product-mention.js";
 import { containsCompetitorBrandMention, sanitizeCompetitorBrandMentions } from "../utils/brand-policy.js";
 import { buildNoContextFallback, extractFluid, getGenericNoAnswerFallback, hasOngoingConversation, isInformationalProductQuestion, resolveClarificationContext, toAudienceLabel, toHistoryPrompt } from "../utils/text.js";
 import { resolveJointPasteClarificationContext } from "../utils/joint-paste.js";
@@ -416,6 +419,46 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         return;
       }
 
+      const ongoingConversationEarly = hasOngoingConversation(historyMessages);
+      if (
+        env.PRODUCT_KNOWLEDGE_ENABLED &&
+        catalogSizeEarly > 0 &&
+        isExplicitProductLookupQuery(effectiveQuery)
+      ) {
+        const directSheetProductEarly = await lookupExplicitCatalogProductForSheet({
+          locale: pkLocaleEarly,
+          userQuery: effectiveQuery,
+          contextQuery: queryForRetrieval,
+          audience,
+        });
+        if (directSheetProductEarly) {
+          console.log("[/api/chat] direct_technical_sheet_early", {
+            sessionId,
+            slug: directSheetProductEarly.slug,
+            name: directSheetProductEarly.canonical_name,
+          });
+          const resellerPromiseEarly =
+            locale === "pl" ? Promise.resolve<Reseller[]>([]) : getCachedResellers().catch(() => []);
+          const cacheKeyEarly = `${ANSWER_CACHE_VERSION}|${locale}|${audience}|${effectiveTheme ?? "none"}|${queryForRetrieval.toLowerCase()}`;
+          await deliverDirectTechnicalSheetTurn({
+            res,
+            sessionId,
+            locale,
+            audience,
+            handoff,
+            geoCountry: effectiveGeoCountry,
+            product: directSheetProductEarly,
+            extractedMeta,
+            queryForRetrieval,
+            cacheKey: cacheKeyEarly,
+            startedAt,
+            resellerPromise: resellerPromiseEarly,
+            ongoingConversation: ongoingConversationEarly,
+          });
+          return;
+        }
+      }
+
       const resellerPromise = locale === "pl" ? Promise.resolve<Reseller[]>([]) : getCachedResellers().catch(() => []);
       const cacheKey = `${ANSWER_CACHE_VERSION}|${locale}|${audience}|${effectiveTheme ?? "none"}|${queryForRetrieval.toLowerCase()}`;
       const cached = answerCache.get(cacheKey);
@@ -489,18 +532,21 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       let preTechnicalFilterCount = 0;
       let pkRouteTags: string[] = [];
       let pkProductSlugs: string[] = [];
+      let pkResolvedProducts: ProductKnowledgeRow[] = [];
 
       if (env.PRODUCT_KNOWLEDGE_ENABLED && catalogSize > 0) {
         const pkRoute = await routeProductKnowledge({
           locale,
           query: retrievalQueryBase,
           searchQuery,
+          userQuery: effectiveQuery,
           theme: effectiveTheme,
           metadata: extractedMeta,
           limit: env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS,
           audience,
         });
         pkRouteTags = pkRoute.tags;
+        pkResolvedProducts = pkRoute.products;
         if (pkRoute.products.length > 0) {
           pkProductSlugs = pkRoute.products.map((p) => p.slug);
           resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkRoute.products);
@@ -626,6 +672,8 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           material: extractedMeta.material,
           fluid: extractedMeta.fluid,
           query: retrievalQueryBase,
+          searchQuery,
+          userQuery: effectiveQuery,
           limit: env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS,
           audience,
         }).catch(() => [] as Awaited<ReturnType<typeof searchProductKnowledge>>);
@@ -658,6 +706,31 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       } else {
         resolvedNodes = capContextNodes(resolvedNodes, env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS);
         retrievalCount = resolvedNodes.length;
+      }
+
+      if (env.PRODUCT_KNOWLEDGE_ENABLED && catalogSize > 0 && hasNamedProductCitation(message)) {
+        const citedProducts = await lookupCatalogProductsByCitation({
+          locale: pkLocale,
+          userQuery: message,
+          audience,
+          limit: 2,
+        });
+        if (citedProducts.length > 0) {
+          const citedNodes = buildRetrieverNodesFromProductKnowledge(citedProducts);
+          resolvedNodes = mergeRetrievalNodes(resolvedNodes, citedNodes);
+          pkResolvedProducts = [
+            ...citedProducts,
+            ...pkResolvedProducts.filter((p) => !citedProducts.some((c) => c.slug === p.slug)),
+          ];
+          pkProductSlugs = [...new Set([...citedProducts.map((p) => p.slug), ...pkProductSlugs])];
+          retrievalPath = "product_knowledge";
+          retrievalCount = resolvedNodes.length;
+          console.log("[/api/chat] cited_product_injected", {
+            sessionId,
+            slugs: citedProducts.map((p) => p.slug),
+            message: message.slice(0, 80),
+          });
+        }
       }
 
       console.log(`Context found: [${retrievalCount}]`, {
@@ -767,11 +840,29 @@ ${sourceUrls.length > 0 ? sourceUrls.map((url) => `- ${url}`).join("\n") : "- au
 
 QUESTION UTILISATEUR: ${queryForRetrieval}
 ${isInformationalProductQuestion(queryForRetrieval) ? "\nTYPE_QUESTION: informational_faq — MODE 1: réponds DIRECTEMENT à la question (couleurs, teinte, disponibilité, oui/non…) en prose naturelle avec les faits de la fiche, AVANT toute recommandation produit. MODE 2 seulement si un produit catalogue précis s'impose." : ""}
+${formatNamedProductCitationPrompt(message)}
 
 RAPPEL_DIAGNOSTIC: Les extraits peuvent melanger fiches techniques (TDS / limites d'application: pression, fluides, temperatures) et fiches de securite (SDS ou FDS / compatibilite chimique, dangers). Croiser les deux familles de documents uniquement lorsque leurs contenus sont presents dans les extraits ci-dessous.
 
 Instruction finale: reponse courte ; cite au plus une URL source du contexte si disponible (lien seul, sans paragraphe sur la citation).`;
       let answer = "";
+      const directSheetProduct =
+        (await lookupExplicitCatalogProductForSheet({
+          locale: pkLocale,
+          userQuery: effectiveQuery,
+          contextQuery: queryForRetrieval,
+          audience,
+        })) ??
+        resolveDirectTechnicalSheetProduct(effectiveQuery, queryForRetrieval, pkResolvedProducts);
+      if (directSheetProduct) {
+        answer = buildDirectTechnicalSheetReply(locale, directSheetProduct);
+        console.log("[/api/chat] direct_technical_sheet", {
+          sessionId,
+          slug: directSheetProduct.slug,
+          name: directSheetProduct.canonical_name,
+        });
+        sseWrite(res, { delta: answer, sessionId, audience }, "chunk");
+      } else {
       try {
         console.log("Calling Mistral...", { sessionId });
         answer = await queryWithRetryAndFallback({
@@ -821,6 +912,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
           res.end();
         }
         return;
+      }
       }
 
       console.log("[/api/chat] mistral_response", {

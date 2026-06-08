@@ -144,6 +144,66 @@ export const RETRIEVAL_REGRESSION_CASES: RetrievalRegressionCase[] = [
     intent: "general_technical",
   },
   {
+    id: "chauffage-fiche-technique-g110-inhibiteur",
+    locale: "fr",
+    theme: "chauffage",
+    audience: "professional",
+    query: "je veux la fiche technique du g110 inhibiteur universel",
+    expectedSlugs: ["g110-inhibiteur-universel"],
+    forbiddenSlugs: ["collafeu-2", "propfeu-plaque-isolante-alu", "propfeu-colle-refractaire-isolant-cheminee"],
+    intent: "product_info",
+  },
+  {
+    id: "chauffage-fiche-technique-g30-desembouant",
+    locale: "fr",
+    theme: "chauffage",
+    audience: "professional",
+    query: "fiche technique g30 desembouant",
+    expectedSlugs: ["g30-desembouant-2"],
+    forbiddenSlugs: ["collafeu-2", "g110-inhibiteur-universel"],
+    intent: "product_info",
+  },
+  {
+    id: "plomberie-fiche-technique-gebsoplast",
+    locale: "fr",
+    theme: "plomberie",
+    audience: "professional",
+    query: "je veux la fiche technique gebsoplast",
+    expectedSlugs: ["gebsoplast"],
+    forbiddenSlugs: ["colle-haute-performance"],
+    intent: "product_info",
+  },
+  {
+    id: "plomberie-fiche-technique-silicone-chrono",
+    locale: "fr",
+    theme: "plomberie",
+    audience: "professional",
+    query: "fiche technique silicone 60 chrono",
+    expectedSlugs: ["silicone-60min-chrono"],
+    forbiddenSlugs: ["silicone-bain-cuisine", "graisse-silicone"],
+    intent: "product_info",
+  },
+  {
+    id: "batiment-fiche-technique-ms-zinc",
+    locale: "fr",
+    theme: "batiment",
+    audience: "professional",
+    query: "je veux la fiche technique du ms zinc",
+    expectedSlugs: ["ms-zinc"],
+    forbiddenSlugs: ["geborizon-silicone-sanitaire", "collafeu-2"],
+    intent: "product_info",
+  },
+  {
+    id: "automobile-fiche-technique-collex-echappement",
+    locale: "fr",
+    theme: "automobile",
+    audience: "professional",
+    query: "fiche technique pate montage echappement collex",
+    expectedSlugs: ["pate-de-montage-echappement-collex"],
+    forbiddenSlugs: ["startex-demarre-moteur-collex", "kit-etancheite-eau-potable"],
+    intent: "product_info",
+  },
+  {
     id: "piscine-kit-reparation-liner-explicite",
     locale: "fr",
     theme: "piscine",
@@ -179,5 +239,32 @@ export const RETRIEVAL_REGRESSION_CASES: RetrievalRegressionCase[] = [
       "resine-detancheite-tous-fluides-special-eau-potable",
     ],
     intent: "general_technical",
+  },
+];
+
+/** Conversational product citations (e.g. « que pensez-vous du G110 ? ») — lookupCatalogProductsByCitation. */
+export const CITATION_REGRESSION_CASES: Array<{
+  id: string;
+  locale: "fr" | "nl" | "pl";
+  query: string;
+  expectedSlugs: string[];
+  forbiddenSlugs?: string[];
+  audience?: Audience | null;
+}> = [
+  {
+    id: "chauffage-citation-g110-opinion",
+    locale: "fr",
+    query: "et que pense tu du g110",
+    expectedSlugs: ["g110-inhibiteur-universel"],
+    forbiddenSlugs: ["inhibiteur-g1"],
+    audience: "particulier",
+  },
+  {
+    id: "chauffage-citation-g110-inhibiteur",
+    locale: "fr",
+    query: "le g110 inhibiteur universel c est bien pour un plancher chauffant ?",
+    expectedSlugs: ["g110-inhibiteur-universel"],
+    forbiddenSlugs: ["inhibiteur-g1", "g10-inhibitor"],
+    audience: "particulier",
   },
 ];

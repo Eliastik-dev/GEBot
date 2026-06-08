@@ -23,6 +23,8 @@ export type ProductRouterInput = {
   locale: string;
   query: string;
   searchQuery: string;
+  /** Message utilisateur brut — citation produit explicite (fiche technique, référence…). */
+  userQuery?: string;
   theme: ProductTheme | null;
   metadata: ExtractedMetadata;
   limit?: number;
@@ -250,6 +252,7 @@ export async function routeProductKnowledge(input: ProductRouterInput): Promise<
     fluid: input.metadata.fluid,
     query: input.query,
     searchQuery: input.searchQuery,
+    ...(input.userQuery ? { userQuery: input.userQuery } : {}),
     limit: input.limit ?? 3,
     audience: input.audience ?? null,
   });

@@ -11,6 +11,17 @@ import {
 import { hasInaccessibleThreadedJointForResinContext } from "../utils/diagnostic-rules.js";
 import { catalogAudienceVisibleForSession, inferCatalogProductAudience } from "./product-theme.service.js";
 import { decodeHtmlEntities } from "../utils/text.js";
+import {
+  computeExplicitProductMatchScore,
+  EXPLICIT_PRODUCT_MATCH_MIN,
+  extractCatalogProductCodes,
+  extractCitedProductSearchTerms,
+  extractProductSearchTerms,
+  hasNamedProductCitation,
+  isExplicitProductLookupQuery,
+  matchesCatalogCodeTerm,
+  resolveDirectTechnicalSheetProduct,
+} from "../utils/product-mention.js";
 
 /** Retry catalog SQL without session theme when themed filter returns too few rows. */
 export const PRODUCT_KNOWLEDGE_THEME_FALLBACK_MIN = 3;
@@ -24,13 +35,19 @@ export type ProductKnowledgeSearchInput = {
   query?: string;
   /** Requête enrichie (synonymes, thème, fluide) — utilisée en plus de `query` pour le scoring. */
   searchQuery?: string;
+  /** Message utilisateur brut (avant expansion LLM) — prioritaire pour citation produit explicite. */
+  userQuery?: string;
   limit?: number;
   /** Filtrer les fiches « grand public » pour les sessions pro. */
   audience?: Audience | null;
 };
 
 function combineRetrievalText(input: ProductKnowledgeSearchInput): string {
-  return [input.query, input.searchQuery].filter(Boolean).join("\n").trim();
+  return [input.userQuery, input.query, input.searchQuery].filter(Boolean).join("\n").trim();
+}
+
+function explicitMatchTexts(input: ProductKnowledgeSearchInput): string[] {
+  return [input.userQuery, input.query, input.searchQuery].filter(Boolean) as string[];
 }
 
 /** Produit cité explicitement par l'utilisateur (hors top tags/thème). */
@@ -52,8 +69,6 @@ const EXPLICIT_CATALOG_PRODUCT_PATTERNS: Array<{ pattern: RegExp; slug: string }
   { pattern: /\btoiturol\b/i, slug: "toiturol" },
   { pattern: /\bacrybat\b/i, slug: "acrybat" },
   { pattern: /\bgebetanche\b/i, slug: "gebetanche-eau-potable-rt1-geb" },
-  { pattern: /\bdetartrans\s*g[-\s]?61\b|\bg[-\s]?61\b.*detartr/i, slug: "g61-detartrant-s-emploie-avec-pompe" },
-  { pattern: /\bdetartrans\s*g[-\s]?60\b|\bg[-\s]?60\b.*detartr|\bdetartrans\b/i, slug: "g60-detartrant-2" },
 ];
 
 function normalizeText(value: string): string {
@@ -62,6 +77,7 @@ function normalizeText(value: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 }
+
 
 /** Short tokens that must still match titre/slug (ABS, PVC…) */
 const SHORT_QUERY_TOKENS = new Set(["abs", "pvc", "ppr", "pe", "pp", "dn"]);
@@ -74,6 +90,7 @@ function scoreProduct(
   query: string,
   sessionAudience: Audience | null | undefined,
   sessionTheme: ProductTheme | null | undefined,
+  explicitTexts: string[] = [],
 ): number {
   let score = 0;
   if (sessionTheme && product.theme === sessionTheme) score += 6;
@@ -168,6 +185,12 @@ function scoreProduct(
     if (title.includes("collafeu") || slug.includes("collafeu")) score -= 25;
     if (title.includes("tresse") && slug.includes("propfeu")) score -= 22;
     if (title.includes("desembou") || slug.includes("g3")) score -= 15;
+  }
+
+  const directProductLookup = explicitTexts.some(isExplicitProductLookupQuery);
+  if (directProductLookup) {
+    const explicitScore = computeExplicitProductMatchScore(product, explicitTexts);
+    if (explicitScore > 0) score += explicitScore;
   }
 
   const normMaterial = material ? normalizeText(material) : "";
@@ -337,8 +360,6 @@ const NAME_KEYWORD_PATTERNS: Array<{ pattern: RegExp; term: string }> = [
   { pattern: /\b(debouch|deboucheur)\b/i, term: "debouch" },
   { pattern: /\b(desembou|g3\b|g70\b)\b/i, term: "desembou" },
   { pattern: /\b(detartr|descal|calcaire|detartrans)\b/i, term: "detartr" },
-  { pattern: /\bg[-\s]?60\b/i, term: "g60" },
-  { pattern: /\bg[-\s]?61\b/i, term: "g61" },
   { pattern: /\b(degripp|debloqu|lubrif|graisse)\b/i, term: "degripp" },
   { pattern: /\b(ptfe|filasse|ruban)\b/i, term: "ptfe" },
   { pattern: /\b(robinet|mitigeur|mousseur).*\b(fuit|fuite)\b|\b(fuit|fuite).*\b(robinet|mitigeur|mousseur)\b/i, term: "filasse" },
@@ -391,6 +412,14 @@ function extractNameSearchTerms(
     terms.add("zinc");
     terms.add("toiturol");
   }
+  for (const code of extractCatalogProductCodes(query)) {
+    terms.add(code);
+  }
+  if (isExplicitProductLookupQuery(query)) {
+    for (const term of extractProductSearchTerms([query])) {
+      terms.add(term);
+    }
+  }
   for (const tag of tags) {
     if (tag === "toiture") {
       terms.add("toiturol");
@@ -430,11 +459,20 @@ async function fetchByNameTerms(locale: "fr" | "nl" | "pl", terms: string[]): Pr
       throw error;
     }
     for (const row of (data as ProductKnowledgeRow[]) ?? []) {
+      if (!matchesCatalogCodeTerm(row.slug, row.canonical_name, term)) continue;
       seen.set(row.slug, row);
     }
   }
 
   return [...seen.values()];
+}
+
+async function fetchByExplicitProductMention(
+  locale: "fr" | "nl" | "pl",
+  texts: string[],
+): Promise<ProductKnowledgeRow[]> {
+  const terms = extractProductSearchTerms(texts);
+  return fetchByNameTerms(locale, terms);
 }
 
 async function fetchExplicitCatalogProducts(
@@ -485,6 +523,7 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
   const tags = input.tags ?? [];
   const limit = input.limit ?? 3;
   const queryText = combineRetrievalText(input);
+  const explicitTexts = explicitMatchTexts(input);
 
   const byTags = await fetchCandidates(input.locale, input.theme, tags);
   const needsThemeFallback =
@@ -500,10 +539,14 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
 
   const nameTerms = extractNameSearchTerms(queryText, tags, input.audience);
   const byName = await fetchByNameTerms(input.locale, nameTerms);
+  const directProductLookup = explicitTexts.some(isExplicitProductLookupQuery);
+  const byExplicitMention = directProductLookup
+    ? await fetchByExplicitProductMention(input.locale, explicitTexts)
+    : [];
   const byExplicit = await fetchExplicitCatalogProducts(input.locale, queryText);
 
   const merged = new Map<string, ProductKnowledgeRow>();
-  for (const row of [...byExplicit, ...byTags, ...byTagsNoTheme, ...byTagsCrossTheme, ...byName]) {
+  for (const row of [...byExplicit, ...byExplicitMention, ...byTags, ...byTagsNoTheme, ...byTagsCrossTheme, ...byName]) {
     merged.set(row.slug, row);
   }
 
@@ -542,14 +585,33 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
         queryText,
         input.audience,
         input.theme,
+        explicitTexts,
       );
       if (explicitSlugs.has(product.slug)) score += 50;
-      return { product, score };
+      const explicitScore = computeExplicitProductMatchScore(product, explicitTexts);
+      return { product, score, explicitScore };
     })
-    .filter((item) => item.score > 0 || explicitSlugs.has(item.product.slug))
-    .sort((a, b) => b.score - a.score);
+    .filter(
+      (item) =>
+        item.score > 0 ||
+        explicitSlugs.has(item.product.slug) ||
+        (directProductLookup && item.explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN),
+    )
+    .sort((a, b) => {
+      if (directProductLookup && b.explicitScore !== a.explicitScore) {
+        return b.explicitScore - a.explicitScore;
+      }
+      return b.score - a.score;
+    });
 
   if (scored.length === 0) return [];
+
+  const strongExplicit = directProductLookup
+    ? scored.filter((item) => item.explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN)
+    : [];
+  if (strongExplicit.length > 0) {
+    return strongExplicit.slice(0, limit).map((item) => item.product);
+  }
 
   return scored.slice(0, limit).map((item) => item.product);
 }
@@ -641,4 +703,77 @@ export async function listProductKnowledgeSlugs(locale: "fr" | "nl" | "pl"): Pro
     throw error;
   }
   return new Set((data ?? []).map((row) => String((row as { slug?: string }).slug ?? "")).filter(Boolean));
+}
+
+/**
+ * Catalogue-wide lookup for explicit fiche technique / FDS requests (any product, no theme/tag filter).
+ */
+export async function lookupExplicitCatalogProductForSheet(input: {
+  locale: "fr" | "nl" | "pl";
+  userQuery: string;
+  contextQuery?: string;
+  audience?: Audience | null;
+}): Promise<ProductKnowledgeRow | null> {
+  if (!isExplicitProductLookupQuery(input.userQuery)) return null;
+
+  const texts = [input.userQuery, input.contextQuery].filter(Boolean) as string[];
+
+  const byMention = await fetchByExplicitProductMention(input.locale, texts);
+  const mentionCandidates = byMention.filter(
+    (p) =>
+      !input.audience ||
+      catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
+  );
+  const fromMention = resolveDirectTechnicalSheetProduct(
+    input.userQuery,
+    input.contextQuery ?? "",
+    mentionCandidates,
+  );
+  if (fromMention) return fromMention;
+
+  const products = await searchProductKnowledge({
+    locale: input.locale,
+    theme: null,
+    tags: [],
+    userQuery: input.userQuery,
+    ...(input.contextQuery ? { query: input.contextQuery } : {}),
+    limit: 8,
+    audience: input.audience ?? null,
+  });
+
+  return resolveDirectTechnicalSheetProduct(input.userQuery, input.contextQuery ?? "", products);
+}
+
+const CITED_PRODUCT_MATCH_MIN = 35;
+
+/** Fetch catalogue rows when the user cites a product by code/name in conversation (e.g. « que pensez-vous du G110 ? »). */
+export async function lookupCatalogProductsByCitation(input: {
+  locale: "fr" | "nl" | "pl";
+  userQuery: string;
+  audience?: Audience | null;
+  limit?: number;
+}): Promise<ProductKnowledgeRow[]> {
+  if (!hasNamedProductCitation(input.userQuery)) return [];
+
+  const terms = extractCitedProductSearchTerms(input.userQuery);
+  if (terms.length === 0) return [];
+
+  const byName = await fetchByNameTerms(input.locale, terms);
+  const codes = extractCatalogProductCodes(input.userQuery);
+  const candidates = byName.filter(
+    (p) =>
+      !input.audience ||
+      catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
+  );
+
+  const scored = candidates
+    .map((product) => ({
+      product,
+      score: computeExplicitProductMatchScore(product, [input.userQuery]),
+      codeHit: codes.some((code) => matchesCatalogCodeTerm(product.slug, product.canonical_name, code)),
+    }))
+    .filter((item) => item.score >= CITED_PRODUCT_MATCH_MIN || item.codeHit)
+    .sort((a, b) => Number(b.codeHit) - Number(a.codeHit) || b.score - a.score);
+
+  return scored.slice(0, input.limit ?? 2).map((item) => item.product);
 }
