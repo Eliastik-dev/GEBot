@@ -28,7 +28,7 @@ import type { Audience, ChatRequestBody, Locale, ProductTheme, Reseller } from "
 import { fireAndForget, withTimeout } from "../utils/async.js";
 import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection } from "../utils/amazon.js";
 import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, normalizeAudience, normalizeLocale } from "../utils/locale.js";
-import { buildComplementaryFollowUp, buildComplementarySuggestion, buildEscalationSection, buildHandoff, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
+import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildEscalationSection, buildHandoff, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
 import { containsCompetitorBrandMention, sanitizeCompetitorBrandMentions } from "../utils/brand-policy.js";
 import { buildNoContextFallback, extractFluid, getGenericNoAnswerFallback, hasOngoingConversation, isInformationalProductQuestion, resolveClarificationContext, toAudienceLabel, toHistoryPrompt } from "../utils/text.js";
 import { resolveJointPasteClarificationContext } from "../utils/joint-paste.js";
@@ -841,7 +841,9 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
 
       if (!validProductRecommended) {
         const stripped = stripAnswerWithoutProductRecommendation(removeAmazonSections(answer));
-        const moreDetails = buildMoreDetailsForProductRequest(locale, audience);
+        const moreDetails = answerProvidesProductGuidance(answer)
+          ? ""
+          : buildMoreDetailsForProductRequest(locale, audience, message);
         answer = [stripped, moreDetails].filter(Boolean).join("\n\n");
         sseWrite(res, { replaceContent: answer, sessionId, audience }, "chunk");
         console.log("[/api/chat] no_product_recommendation", {

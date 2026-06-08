@@ -1,5 +1,6 @@
 import { COMPLEMENTARY_HINTS } from "../config/constants.js";
 import type { Audience, HandoffPayload, Locale, Reseller } from "../types/index.js";
+import { detectTheme } from "./locale.js";
 import { normalizeText } from "./text.js";
 
 export function buildHandoff(locale: Locale, audience: Audience | null): HandoffPayload {
@@ -277,25 +278,83 @@ export function stripAnswerWithoutProductRecommendation(answer: string): string 
   return out.replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** True when the answer already names a product or gives actionable guidance (skip generic follow-up). */
+export function answerProvidesProductGuidance(answer: string): boolean {
+  if (/solution\s+adapt[eé]e\s*:\s*\S+/i.test(answer)) return true;
+  if (/produit\s+(conseill[eé]|sugg[eé]r[eé])\s*:\s*\S+/i.test(answer)) return true;
+  if (/orient[eé]\s+vers\s+(le\s+)?service\s+consommateurs/i.test(answer)) return true;
+  if (/contactez\s+(le\s+)?service\s+consommateurs/i.test(answer)) return true;
+  if (/aucun\s+(des\s+)?produits?\s+geb/i.test(answer) && /\bgeb[\wéèêë\-+]+\b/i.test(answer)) return true;
+  return false;
+}
+
 export function buildMoreDetailsForProductRequest(
   locale: Locale,
   audience: Audience | null,
+  message?: string,
 ): string {
   const isPro = audience === "professional";
+  const normalized = message ? normalizeText(message) : "";
+  const theme = message ? detectTheme(message) : null;
+  const isFaucet =
+    /\b(robinet|mousseur|mitigeur|bec|cartouche|perlateur|tap|faucet|aerator)\b/.test(normalized);
+  const isRoofOrBuilding =
+    theme === "batiment" ||
+    /\b(toiture|zinc|facade|gouttiere|membrane|etancheite|bardage|charpente)\b/.test(normalized);
+  const isPool = theme === "piscine" || /\b(piscine|liner|bassin|pool)\b/.test(normalized);
+  const isPipe =
+    /\b(tuyau|canalisation|tube|raccord|pipe|pvc|evacuation)\b/.test(normalized) && !isFaucet;
+
   if (locale === "en") {
-    return isPro
-      ? "### 💡 To find a suitable GEB product\nPlease specify:\n- Exact leak location (thread, cartridge, aerator, seal)\n- Tap material if known (brass, chrome fitting)\n- Whether the installation is under pressure or dripping when closed\n- Any product reference already on site"
-      : "### 💡 To find a suitable GEB product\nPlease specify:\n- Where exactly it leaks (thread, aerator, internal seal)\n- Tap type / brand if known\n- Photo or short description of the fitting\n- Whether water drips when the tap is closed";
+    if (isFaucet) {
+      return isPro
+        ? "### 💡 To find a suitable GEB product\nPlease specify:\n- Exact leak location (thread, cartridge, aerator, seal)\n- Tap material if known (brass, chrome fitting)\n- Whether the installation is under pressure or dripping when closed\n- Any product reference already on site"
+        : "### 💡 To find a suitable GEB product\nPlease specify:\n- Where exactly it leaks (thread, aerator, internal seal)\n- Tap type / brand if known\n- Photo or short description of the fitting\n- Whether water drips when the tap is closed";
+    }
+    if (isRoofOrBuilding) {
+      return "### 💡 To find a suitable GEB product\nPlease specify:\n- **Substrate** (zinc, tile, membrane, other)\n- **Exact area** (ridge, joint, penetration, gutter)\n- **Exposure** to weather and current surface condition\n- A **photo** of the area if possible";
+    }
+    if (isPool) {
+      return "### 💡 To find a suitable GEB product\nPlease specify:\n- **Pool type** (liner, polyester shell, tiled)\n- **Leak location** (skimmer, return, liner tear, joint)\n- Whether the pool is **full or empty**\n- A **photo** if possible";
+    }
+    if (isPipe) {
+      return "### 💡 To find a suitable GEB product\nPlease specify:\n- **Pipe material** and diameter if known\n- **Leak location** (joint, crack, threaded fitting)\n- **Fluid** in contact and whether it is under pressure\n- A **photo** if possible";
+    }
+    return "### 💡 To find a suitable GEB product\nPlease specify:\n- **Substrate** and exact location of the issue\n- **Fluid or environment** in contact (if any)\n- **Context** (indoor/outdoor, pressurized or not)\n- A **photo** or short description if possible";
   }
   if (locale === "nl") {
-    return "### 💡 Meer details nodig\n- Exacte plaats van het lek (draad, sifon, perlator)\n- Materiaal van de kraan indien bekend\n- Onder druk of druppelend bij gesloten stand";
+    if (isFaucet) {
+      return "### 💡 Meer details nodig\n- Exacte plaats van het lek (draad, sifon, perlator)\n- Materiaal van de kraan indien bekend\n- Onder druk of druppelend bij gesloten stand";
+    }
+    if (isRoofOrBuilding) {
+      return "### 💡 Meer details nodig\n- **Ondergrond** (zink, tegel, membraan)\n- **Exacte zone** (nok, aansluiting, doorvoer)\n- **Weersomstandigheden** en huidige staat van het oppervlak\n- Een **foto** indien mogelijk";
+    }
+    return "### 💡 Meer details nodig\n- **Ondergrond** en exacte plaats\n- **Medium of omgeving** in contact (indien van toepassing)\n- **Context** (binnen/buiten, onder druk of niet)\n- Een **foto** of korte beschrijving indien mogelijk";
   }
   if (locale === "pl") {
-    return "### 💡 Potrzebujemy wiecej szczegolow\n- Dokladne miejsce wycieku (gwint, aerator, uszczelka)\n- Material baterii jesli znany\n- Czy kapi przy zamknietym zaworze";
+    if (isFaucet) {
+      return "### 💡 Potrzebujemy wiecej szczegolow\n- Dokladne miejsce wycieku (gwint, aerator, uszczelka)\n- Material baterii jesli znany\n- Czy kapi przy zamknietym zaworze";
+    }
+    if (isRoofOrBuilding) {
+      return "### 💡 Potrzebujemy wiecej szczegolow\n- **Podloze** (cynk, dachowka, membrana)\n- **Dokladna strefa** (kalenica, polaczenie, przejscie)\n- **Ekspozycja** na warunki atmosferyczne\n- **Zdjecie** jesli mozliwe";
+    }
+    return "### 💡 Potrzebujemy wiecej szczegolow\n- **Podloze** i dokladne miejsce\n- **Czynnik lub srodowisko** w kontakcie (jesli dotyczy)\n- **Kontekst** (wewnatrz/na zewnatrz, pod cisnieniem lub nie)\n- **Zdjecie** lub krotki opis jesli mozliwe";
   }
-  return isPro
-    ? "### 💡 Pour identifier un produit GEB adapté\nMerci de préciser encore :\n- **Emplacement exact** de la fuite (filetage, cartouche, joint du mousseur, base du bec)\n- **Matière** du robinet / raccord si vous la connaissez\n- **Contexte** : goutte à l'arrêt, fuite au débit ouvert, eau chaude ou froide\n- **Référence** ou photo du modèle si possible"
-    : "### 💡 Pour identifier un produit GEB adapté\nMerci de préciser encore :\n- **Où** ça fuit exactement (filetage du mousseur, joint interne, base du robinet)\n- **Type de robinet** ou marque si vous la connaissez\n- Est-ce que ça goutte **robinet fermé** ou seulement à l'ouverture ?\n- Une **photo** ou le modèle du robinet si possible";
+  if (isFaucet) {
+    return isPro
+      ? "### 💡 Pour identifier un produit GEB adapté\nMerci de préciser encore :\n- **Emplacement exact** de la fuite (filetage, cartouche, joint du mousseur, base du bec)\n- **Matière** du robinet / raccord si vous la connaissez\n- **Contexte** : goutte à l'arrêt, fuite au débit ouvert, eau chaude ou froide\n- **Référence** ou photo du modèle si possible"
+      : "### 💡 Pour identifier un produit GEB adapté\nMerci de préciser encore :\n- **Où** ça fuit exactement (filetage du mousseur, joint interne, base du robinet)\n- **Type de robinet** ou marque si vous la connaissez\n- Est-ce que ça goutte **robinet fermé** ou seulement à l'ouverture ?\n- Une **photo** ou le modèle du robinet si possible";
+  }
+  if (isRoofOrBuilding) {
+    return "### 💡 Pour identifier un produit GEB adapté\nMerci de préciser encore :\n- **Support** concerné (zinc, tuile, membrane, autre)\n- **Zone exacte** (faîtage, noue, raccord, point de pénétration)\n- **Exposition** aux intempéries et état actuel de la surface\n- Une **photo** de la zone si possible";
+  }
+  if (isPool) {
+    return "### 💡 Pour identifier un produit GEB adapté\nMerci de préciser encore :\n- **Type de bassin** (liner, coque polyester, carrelé)\n- **Emplacement** de la fuite (skimmer, refoulement, déchirure liner, joint)\n- Bassin **plein ou vidé**\n- Une **photo** si possible";
+  }
+  if (isPipe) {
+    return "### 💡 Pour identifier un produit GEB adapté\nMerci de préciser encore :\n- **Matière** et diamètre de la canalisation si connus\n- **Emplacement** de la fuite (joint, fissure, raccord fileté)\n- **Fluide** en contact et présence ou non de pression\n- Une **photo** si possible";
+  }
+  return "### 💡 Pour identifier un produit GEB adapté\nMerci de préciser encore :\n- **Support** et emplacement exact du problème\n- **Fluide ou environnement** en contact (le cas échéant)\n- **Contexte** (intérieur/extérieur, sous pression ou non)\n- Une **photo** ou description courte si possible";
 }
 
 export function buildResellerSection(locale: Locale, resellers: Reseller[]): string {
