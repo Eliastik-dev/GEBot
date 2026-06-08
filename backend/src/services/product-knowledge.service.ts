@@ -9,6 +9,10 @@ import {
   userRejectsPiscineProduct,
 } from "../utils/joint-paste.js";
 import { hasInaccessibleThreadedJointForResinContext } from "../utils/diagnostic-rules.js";
+import {
+  feedbackSlugScoreDelta,
+  type FeedbackSlugAdjustments,
+} from "./feedback-retrieval.service.js";
 import { catalogAudienceVisibleForSession, inferCatalogProductAudience } from "./product-theme.service.js";
 import { decodeHtmlEntities } from "../utils/text.js";
 import {
@@ -40,6 +44,8 @@ export type ProductKnowledgeSearchInput = {
   limit?: number;
   /** Filtrer les fiches « grand public » pour les sessions pro. */
   audience?: Audience | null;
+  /** Boost / penalize slugs from user thumbs-up/down feedback. */
+  feedbackAdjustments?: FeedbackSlugAdjustments;
 };
 
 function combineRetrievalText(input: ProductKnowledgeSearchInput): string {
@@ -185,6 +191,18 @@ function scoreProduct(
     if (title.includes("collafeu") || slug.includes("collafeu")) score -= 25;
     if (title.includes("tresse") && slug.includes("propfeu")) score -= 22;
     if (title.includes("desembou") || slug.includes("g3")) score -= 15;
+  }
+
+  const heatingInhibitorContext =
+    (tags.includes("desembouage") || fluid === "chauffage") &&
+    /\b(inhibiteur|desembou|universel|plancher\s+chauffant|radiateur|g110|g10\b|g3\b|g70\b)\b/.test(q);
+  if (heatingInhibitorContext) {
+    if (slug.includes("g110") || title.includes("g110")) score += 32;
+    if (title.includes("inhibiteur universel")) score += 26;
+    if (title.includes("inhibiteur")) score += slug.includes("g10") && !slug.includes("g110") ? 10 : 6;
+    if (slug.includes("collafeu") || title.includes("collafeu") || title.includes("propfeu")) score -= 45;
+    if (title.includes("refractaire") || slug.includes("cheminee")) score -= 35;
+    if (/\buniversel\b/.test(q) && (slug.includes("g110") || title.includes("universel"))) score += 18;
   }
 
   const directProductLookup = explicitTexts.some(isExplicitProductLookupQuery);
@@ -359,6 +377,7 @@ const NAME_KEYWORD_PATTERNS: Array<{ pattern: RegExp; term: string }> = [
   { pattern: /\bmicro[- ]?fuites?\b/i, term: "colmateur" },
   { pattern: /\b(debouch|deboucheur)\b/i, term: "debouch" },
   { pattern: /\b(desembou|g3\b|g70\b)\b/i, term: "desembou" },
+  { pattern: /\b(inhibiteur|g110|g10\b)\b/i, term: "inhibiteur" },
   { pattern: /\b(detartr|descal|calcaire|detartrans)\b/i, term: "detartr" },
   { pattern: /\b(degripp|debloqu|lubrif|graisse)\b/i, term: "degripp" },
   { pattern: /\b(ptfe|filasse|ruban)\b/i, term: "ptfe" },
@@ -395,6 +414,10 @@ function extractNameSearchTerms(
     return [...terms];
   }
 
+  if (/\buniversel\b/.test(q) && /\b(inhibiteur|desembou|chauffage|plancher|radiateur|g110|g10\b)\b/.test(q)) {
+    terms.add("g110");
+    terms.add("inhibiteur");
+  }
   for (const { pattern, term } of NAME_KEYWORD_PATTERNS) {
     if (!pattern.test(q)) continue;
     if (term === "gebsoplast" && sessionAudience === "particulier") {
@@ -589,6 +612,7 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
       );
       if (explicitSlugs.has(product.slug)) score += 50;
       const explicitScore = computeExplicitProductMatchScore(product, explicitTexts);
+      score += feedbackSlugScoreDelta(product.slug, input.feedbackAdjustments);
       return { product, score, explicitScore };
     })
     .filter(

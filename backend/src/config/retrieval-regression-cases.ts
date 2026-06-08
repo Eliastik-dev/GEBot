@@ -144,6 +144,18 @@ export const RETRIEVAL_REGRESSION_CASES: RetrievalRegressionCase[] = [
     intent: "general_technical",
   },
   {
+    id: "chauffage-inhibiteur-universel-followup",
+    locale: "fr",
+    theme: "chauffage",
+    audience: "professional",
+    query:
+      "je souhaite proteger mon plancher chauffant apres un desembouage\nje cherche un produit plus universel",
+    fluid: "chauffage",
+    expectedSlugs: ["g110-inhibiteur-universel"],
+    forbiddenSlugs: ["inhibiteur-g1", "filasse", "gebetanche"],
+    intent: "product_info",
+  },
+  {
     id: "chauffage-fiche-technique-g110-inhibiteur",
     locale: "fr",
     theme: "chauffage",

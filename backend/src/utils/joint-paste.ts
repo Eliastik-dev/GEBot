@@ -67,7 +67,13 @@ export function userRejectsPiscineProduct(text: string): boolean {
 const JOINT_FLUID_RULES: Array<{ pattern: RegExp; category: JointServiceFluidCategory; metadataFluid: string; label: string }> = [
   { pattern: /\b(gaz|gpl|butane|propane|gaz\s+de\s+ville)\b/, category: "gaz", metadataFluid: "gaz", label: "gaz" },
   { pattern: /\b(hydrocarbure|fioul|fuel|mazout|citerne)\b/, category: "hydrocarbure", metadataFluid: "huile", label: "hydrocarbures" },
-  { pattern: /\b(glycol|caloporteur|circuit\s+ferme|ctf\b|circuit\s+chauff)\b/, category: "chauffage_glycol", metadataFluid: "chauffage", label: "eau glycolée / chauffage" },
+  {
+    pattern:
+      /\b(glycol|caloporteur|circuits?\s+ferm|ctf\b|circuit\s+chauff|plancher\s+chauffant|chauffage\s+central|desembou|embouage|inhibiteur|\bg3\b|\bg10\b|\bg110\b|radiateur)\b/,
+    category: "chauffage_glycol",
+    metadataFluid: "chauffage",
+    label: "eau glycolée / chauffage",
+  },
   { pattern: /\b(eau\s+piscine|piscine|eau\s+chlore|eau\s+chlor|bassin|liner)\b/, category: "piscine", metadataFluid: "eau", label: "eau piscine / chlorée" },
   { pattern: /\b(eau\s+potable|potable\s+sanitaire|\bpotable\b)/, category: "eau_potable", metadataFluid: "eau", label: "eau potable" },
   { pattern: /\b(evacuation\s+sous\s+pression|egout\s+sous\s+pression|usee\s+sous\s+pression)\b/, category: "evacuation_pressurized", metadataFluid: "eau", label: "évacuation sous pression" },

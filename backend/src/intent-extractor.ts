@@ -71,6 +71,7 @@ import {
 } from "./utils/joint-paste.js";
 import {
   hasDescalingContext,
+  hasHeatingCircuitContext,
   hasObviousLeakOrPipeDamageIntent,
   isBuildingEnvelopeLeakContext,
   isPersonalDrinkwareOutOfCatalog,
@@ -429,6 +430,8 @@ Rules:
 - Distinguish installation/lubrication from actual damage repair
 - If the user explicitly says "pas de fuite", "pas de trou", "pas de diamètre" — respect that and do NOT classify as leak/pipe_repair
 - Descaling / détartrage (échangeur à plaques, calcaire, tartre, Detartrans G60/G61…) is general_technical or product_info — NEVER leak_repair; "sous pression" alone in that context means operating regime, not a leak
+- Heating circuit maintenance (désembouage, inhibiteur, radiateur, plancher chauffant, G3/G10/G110, neutralisant…) is NOT thread paste — set fluid=chauffage when context is in transcript; NEVER add joint_service_fluid
+- Follow-ups like "un produit plus universel" after an inhibitor recommendation (G10 vs G110) are product_info — needs_clarification=false; use transcript heating context
 - Personal drinkware (gourde, bouteille de boisson réutilisable) with crack/leak is **out of GEB plumbing catalog** — intent general_technical, needs_clarification=false, do NOT add plumbing synonyms (ptfe, filasse, pâte joint, gebetanche)
 - A clogged/blocked radiator or uneven heating is general_technical (heating diagnostic), NOT pipe_repair
 - Be conservative on safety for leaks, but do NOT over-clarify non-safety queries
@@ -575,6 +578,35 @@ function applyDescalingSanitizer(merged: ExtractedMetadata, conversationText: st
   }
 }
 
+function applyHeatingCircuitSanitizer(merged: ExtractedMetadata, conversationText: string): void {
+  const leakLike: Intent[] = ["leak_repair", "pipe_repair", "inaccessible_leak"];
+  if (leakLike.includes(merged.intent)) {
+    merged.intent = /\b(g110|g10|g3|g70|universel|compar|versus|ou\s+le|alternative)\b/i.test(conversationText)
+      ? "product_info"
+      : "general_technical";
+    merged.confidence = Math.max(merged.confidence, 0.75);
+  }
+  merged.damage_type = null;
+  merged.missing_params = merged.missing_params.filter(
+    (p) => !["joint_service_fluid", "fluid", "diameter", "pressure"].includes(p),
+  );
+  merged.needs_clarification = merged.missing_params.length > 0;
+  if (!merged.fluid) merged.fluid = "chauffage";
+
+  const pollutant =
+    /fuite|colmat|patch|gebetanche|pate\s+joint|filasse|ptfe|ruban|resine|plomberie|raccord|filetage|etancheite|etanchéité/i;
+  const wantsUniversal = /\b(universel|plus\s+universel|alternative|autre\s+produit|plutot|plutôt|compar)\b/i.test(
+    conversationText,
+  );
+  merged.synonyms = [
+    ...new Set([
+      ...merged.synonyms.filter((s) => !pollutant.test(s)),
+      ...buildSynonyms(merged.intent, "chauffage", merged.material),
+      ...(wantsUniversal ? ["G110", "inhibiteur universel", "universel"] : []),
+    ]),
+  ];
+}
+
 function applyJointServiceFluidAndNonLeakSanitizer(
   merged: ExtractedMetadata,
   transcript: string,
@@ -584,12 +616,20 @@ function applyJointServiceFluidAndNonLeakSanitizer(
   const conversationText = `${transcript}\n${currentMessage}`;
   const pasteJointContext =
     asksMetalThreadPasteJoint(currentMessage) || asksMetalThreadPasteJoint(transcript);
+  const heatingCircuitContext = hasHeatingCircuitContext(conversationText);
   const fluidKnown = jointServiceFluidStatedInText(conversationText);
   const parsedFluid = parseJointServiceFluid(conversationText);
+
+  if (heatingCircuitContext && !pasteJointContext) {
+    merged.missing_params = merged.missing_params.filter((p) => p !== "joint_service_fluid");
+    if (!merged.fluid) merged.fluid = "chauffage";
+    if (merged.missing_params.length === 0) merged.needs_clarification = false;
+  }
 
   if (
     !isLeakLike &&
     pasteJointContext &&
+    !heatingCircuitContext &&
     !fluidKnown &&
     JOINT_AMBIGUOUS_INTENTS.includes(merged.intent)
   ) {
@@ -614,7 +654,10 @@ function applyJointServiceFluidAndNonLeakSanitizer(
   }
 
   if (!isLeakLike) {
-    const preserveJointSf = merged.missing_params.includes("joint_service_fluid");
+    const preserveJointSf =
+      merged.missing_params.includes("joint_service_fluid") &&
+      pasteJointContext &&
+      !heatingCircuitContext;
     const leakOnlyParams = new Set(["diameter", "pressure", "material"]);
     merged.missing_params = merged.missing_params.filter((p) => !leakOnlyParams.has(p));
     const hasAnyContext = Boolean(merged.fluid) || Boolean(merged.material)
@@ -647,6 +690,11 @@ export async function runDiagnosticAnalysis(
     !drinkwareOutOfCatalog &&
     hasDescalingContext(conversationText) &&
     !hasObviousLeakOrPipeDamageIntent(conversationText);
+  const heatingCircuitContext =
+    !drinkwareOutOfCatalog &&
+    !descalingContext &&
+    hasHeatingCircuitContext(conversationText) &&
+    !hasObviousLeakOrPipeDamageIntent(conversationText);
 
   if (!llmResult) {
     const m: ExtractedMetadata = { ...fallback };
@@ -661,6 +709,13 @@ export async function runDiagnosticAnalysis(
     applyBuildingEnvelopeLeakEnrichment(m, conversationText);
     if (descalingContext) {
       applyDescalingSanitizer(m, conversationText);
+      return {
+        metadata: m,
+        clarification_message: m.needs_clarification ? buildClarificationFromMetadata(m, locale) : null,
+      };
+    }
+    if (heatingCircuitContext) {
+      applyHeatingCircuitSanitizer(m, conversationText);
       return {
         metadata: m,
         clarification_message: m.needs_clarification ? buildClarificationFromMetadata(m, locale) : null,
@@ -713,6 +768,7 @@ export async function runDiagnosticAnalysis(
   if (
     !drinkwareOutOfCatalog &&
     !descalingContext &&
+    !heatingCircuitContext &&
     fallback.intent === "leak_repair" &&
     merged.intent === "general_technical"
   ) {
@@ -746,6 +802,8 @@ export async function runDiagnosticAnalysis(
     applyPersonalDrinkwareSanitizer(merged, conversationText);
   } else if (descalingContext) {
     applyDescalingSanitizer(merged, conversationText);
+  } else if (heatingCircuitContext) {
+    applyHeatingCircuitSanitizer(merged, conversationText);
   } else {
     applyBuildingEnvelopeLeakEnrichment(merged, conversationText);
     const isLeakLike = ["leak_repair", "pipe_repair", "inaccessible_leak"].includes(merged.intent);

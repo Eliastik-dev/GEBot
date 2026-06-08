@@ -11,12 +11,11 @@ import {
   expandRetrievalQueryWithLlm,
   queryWithRetryAndFallback,
 } from "../services/ai.service.js";
-import { findSimilarGoldenExamples } from "../services/golden-examples.service.js";
-import { findSimilarNegativeFeedback } from "../services/negative-examples.service.js";
+import { resolveFeedbackRetrievalContext } from "../services/feedback-retrieval.service.js";
 import { ensureSession, getSessionTheme, loadRecentMessages, logProblemEvent, logProductAnalytics, logQuery, saveMessage, updateSessionAudience, updateSessionTheme } from "../services/database.service.js";
 import { scheduleJudgeEvaluation, type JudgeInput } from "../services/judge.service.js";
 import { buildSearchQuery, buildThemeAwareSearchQuery, capContextNodes, enrichRetrievalQuery, extractSourceUrlsFromNodes, getCachedResellers, mergeRetrievalNodes, prioritizeTechnicalSheets, summarizeNodeForDebug, AUTOMOTIVE_EXHAUST_SUPPLEMENT_QUERY } from "../services/rag.service.js";
-import { hasDescalingContext, isBuildingEnvelopeLeakContext, isPersonalDrinkwareOutOfCatalog } from "../utils/diagnostic-rules.js";
+import { hasDescalingContext, hasHeatingCircuitContext, isBuildingEnvelopeLeakContext, isPersonalDrinkwareOutOfCatalog } from "../utils/diagnostic-rules.js";
 import { countProductKnowledge, lookupCatalogProductsByCitation, lookupExplicitCatalogProductForSheet, searchProductKnowledge } from "../services/product-knowledge.service.js";
 import { deliverDirectTechnicalSheetTurn } from "../services/direct-sheet.service.js";
 import {
@@ -40,6 +39,21 @@ import { startSse, sseWrite } from "../utils/sse.js";
 import type { VectorStoreIndex } from "llamaindex";
 
 export type ChatDeps = { index: VectorStoreIndex; vectorStore: unknown };
+
+function nodeSlugFromRetrievalItem(item: unknown): string {
+  const metadata = (item as { node?: { metadata?: Record<string, unknown> } }).node?.metadata ?? {};
+  return String(metadata.slug ?? "");
+}
+
+function filterRetrievalNodesByFeedbackPenalties(nodes: unknown[], penalizeSlugs: string[]): unknown[] {
+  if (penalizeSlugs.length === 0 || nodes.length === 0) return nodes;
+  const filtered = nodes.filter((item) => {
+    const slug = nodeSlugFromRetrievalItem(item);
+    if (!slug) return true;
+    return !penalizeSlugs.some((target) => slug.includes(target) || target.includes(slug));
+  });
+  return filtered.length > 0 ? filtered : nodes;
+}
 
 export async function postChat(req: Request, res: Response, deps: ChatDeps) {
     const startedAt = Date.now();
@@ -333,6 +347,23 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         console.log("[/api/chat] building_envelope_bypass", { sessionId, intent: extractedMeta.intent });
       }
 
+      if (
+        extractedMeta.needs_clarification &&
+        hasHeatingCircuitContext(conversationFull) &&
+        extractedMeta.missing_params.every((p) => p === "joint_service_fluid" || p === "fluid")
+      ) {
+        extractedMeta.needs_clarification = false;
+        extractedMeta.missing_params = [];
+        if (!extractedMeta.fluid) extractedMeta.fluid = "chauffage";
+        if (/\b(universel|plus\s+universel|alternative|compar)\b/i.test(message)) {
+          extractedMeta.intent = "product_info";
+          extractedMeta.synonyms = [
+            ...new Set([...extractedMeta.synonyms, "G110", "inhibiteur universel", "universel"]),
+          ];
+        }
+        console.log("[/api/chat] heating_circuit_clarification_bypass", { sessionId, intent: extractedMeta.intent });
+      }
+
       if (isPersonalDrinkwareOutOfCatalog(conversationFull)) {
         const drinkwareReply = buildPersonalDrinkwareOutOfScopeReply(locale, audience);
         const escalationSection = buildEscalationSection(locale, audience);
@@ -534,6 +565,50 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       let pkProductSlugs: string[] = [];
       let pkResolvedProducts: ProductKnowledgeRow[] = [];
 
+      const feedbackQuery = `${queryForRetrieval}\n${searchQuery}`.trim();
+      const feedbackCtx = await resolveFeedbackRetrievalContext(feedbackQuery, locale, sessionId).catch(
+        () => ({
+          boostSlugs: [] as string[],
+          sessionBoostSlugs: [] as string[],
+          penalizeSlugs: [] as string[],
+          sessionPenalizeSlugs: [] as string[],
+          goldenExamples: [] as Array<{ userQuery: string; assistantReply: string }>,
+          negativeExamples: [] as Array<{
+            userQuery: string;
+            productSlugs: string[];
+            retrievalPath: string | null;
+            recommendedProduct: string | null;
+          }>,
+        }),
+      );
+      const feedbackAdjustments = {
+        boostSlugs: feedbackCtx.boostSlugs,
+        sessionBoostSlugs: feedbackCtx.sessionBoostSlugs,
+        penalizeSlugs: feedbackCtx.penalizeSlugs,
+        sessionPenalizeSlugs: feedbackCtx.sessionPenalizeSlugs,
+      };
+      const allPenalizedSlugs = [
+        ...new Set([...feedbackCtx.penalizeSlugs, ...feedbackCtx.sessionPenalizeSlugs]),
+      ];
+      if (
+        feedbackCtx.boostSlugs.length > 0 ||
+        feedbackCtx.sessionBoostSlugs.length > 0 ||
+        feedbackCtx.penalizeSlugs.length > 0 ||
+        feedbackCtx.sessionPenalizeSlugs.length > 0 ||
+        feedbackCtx.goldenExamples.length > 0 ||
+        feedbackCtx.negativeExamples.length > 0
+      ) {
+        console.log("[/api/chat] feedback_retrieval", {
+          sessionId,
+          boost: feedbackCtx.boostSlugs,
+          sessionBoost: feedbackCtx.sessionBoostSlugs,
+          penalize: feedbackCtx.penalizeSlugs,
+          sessionPenalize: feedbackCtx.sessionPenalizeSlugs,
+          golden: feedbackCtx.goldenExamples.length,
+          negative: feedbackCtx.negativeExamples.length,
+        });
+      }
+
       if (env.PRODUCT_KNOWLEDGE_ENABLED && catalogSize > 0) {
         const pkRoute = await routeProductKnowledge({
           locale,
@@ -544,6 +619,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           metadata: extractedMeta,
           limit: env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS,
           audience,
+          feedbackAdjustments,
         });
         pkRouteTags = pkRoute.tags;
         pkResolvedProducts = pkRoute.products;
@@ -663,6 +739,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           effectiveTheme,
           { lite: vectorRagLite },
         );
+        resolvedNodes = filterRetrievalNodesByFeedbackPenalties(resolvedNodes, allPenalizedSlugs);
         preTechnicalFilterCount = retrievalCount;
 
         const catalogAnchor = await searchProductKnowledge({
@@ -804,10 +881,8 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
 
       const sourceUrls = extractSourceUrlsFromNodes(resolvedNodes);
       const conversationTranscript = buildPreAnalysisTranscript(historyMessages, message);
-      const [goldenExamples, negativeExamples] = await Promise.all([
-        findSimilarGoldenExamples(searchQuery, locale, 2).catch(() => []),
-        findSimilarNegativeFeedback(searchQuery, locale, 2).catch(() => []),
-      ]);
+      const goldenExamples = feedbackCtx.goldenExamples;
+      const negativeExamples = feedbackCtx.negativeExamples;
       const retrieverForAnswer = deps.index.asRetriever({
         similarityTopK: env.TOP_K,
         filters: preFilters,

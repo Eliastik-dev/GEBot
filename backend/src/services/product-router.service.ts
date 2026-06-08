@@ -17,6 +17,7 @@ import {
   parseJointServiceFluid,
 } from "../utils/joint-paste.js";
 import { searchProductKnowledge } from "./product-knowledge.service.js";
+import type { FeedbackSlugAdjustments } from "./feedback-retrieval.service.js";
 import { inferCatalogProductAudience } from "./product-theme.service.js";
 
 export type ProductRouterInput = {
@@ -29,6 +30,7 @@ export type ProductRouterInput = {
   metadata: ExtractedMetadata;
   limit?: number;
   audience?: Audience | null;
+  feedbackAdjustments?: FeedbackSlugAdjustments;
 };
 
 function normalizeText(value: string): string {
@@ -98,7 +100,14 @@ export function resolveUseCaseTags(input: ProductRouterInput): string[] {
   if (theme === "piscine") tags.add("piscine");
   if (theme === "chauffage") {
     tags.add("chauffage");
-    tags.add("haute_temperature");
+    const heatingMaintenance =
+      metadata.fluid === "chauffage" ||
+      /\b(inhibiteur|desembou|embouage|g110|g10\b|g3\b|g70\b|neutralisant|plancher\s+chauffant|radiateur)\b/.test(q);
+    if (heatingMaintenance) {
+      tags.add("desembouage");
+    } else {
+      tags.add("haute_temperature");
+    }
   }
   if (theme === "batiment") {
     tags.add("facade");
@@ -153,7 +162,14 @@ export function resolveUseCaseTags(input: ProductRouterInput): string[] {
   }
 
   if (!pasteJoint && /debouch|bouch|obstru/.test(q)) tags.add("debouchage");
-  if (!pasteJoint && !isDescaling && /desembou|embouage|radiateur/.test(q)) tags.add("desembouage");
+  if (!pasteJoint && !isDescaling && /desembou|embouage|radiateur|inhibiteur/.test(q)) tags.add("desembouage");
+  if (
+    /\buniversel\b/.test(q) &&
+    /\b(inhibiteur|desembou|chauffage|plancher|radiateur|g110|g10\b)\b/.test(q)
+  ) {
+    tags.add("chauffage");
+    tags.add("desembouage");
+  }
   if (/cheminee|poele|insert|refractaire/.test(q)) tags.add("cheminee");
   if (metadata.fluid === "gaz" || /gaz|gpl/.test(q)) tags.add("gaz");
   if (metadata.fluid === "chauffage") tags.add("chauffage");
@@ -255,6 +271,7 @@ export async function routeProductKnowledge(input: ProductRouterInput): Promise<
     ...(input.userQuery ? { userQuery: input.userQuery } : {}),
     limit: input.limit ?? 3,
     audience: input.audience ?? null,
+    ...(input.feedbackAdjustments ? { feedbackAdjustments: input.feedbackAdjustments } : {}),
   });
 
   return { products, tags };

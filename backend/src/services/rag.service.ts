@@ -3,7 +3,7 @@ import { SupabaseVectorStore } from "@llamaindex/supabase";
 import { env } from "../config/env.js";
 import { GEO_TIMEOUT_MS, RESELLER_CACHE_TTL_MS, RESELLER_DIRECTORY_URL } from "../config/constants.js";
 import type { Locale, ProductTheme, Reseller, StoredMessage } from "../types/index.js";
-import { hasDescalingContext, hasInaccessibleThreadedJointForResinContext, isJointSealingAssemblyWithoutLeak, isPersonalDrinkwareOutOfCatalog, isPurePipeLeakDamageTurn, isThinRetrievalQuery, userTurnRelevantToLeakRepairThread, hasObviousLeakOrPipeDamageIntent, isThreadedJointOrLiquidSealingTopic } from "../utils/diagnostic-rules.js";
+import { hasDescalingContext, hasHeatingCircuitContext, hasInaccessibleThreadedJointForResinContext, isJointSealingAssemblyWithoutLeak, isPersonalDrinkwareOutOfCatalog, isPurePipeLeakDamageTurn, isThinRetrievalQuery, userTurnRelevantToLeakRepairThread, hasObviousLeakOrPipeDamageIntent, isThreadedJointOrLiquidSealingTopic } from "../utils/diagnostic-rules.js";
 import { isProfileOnlyMessage, isThemeOnlyMessage } from "../utils/locale.js";
 import { normalizeText } from "../utils/text.js";
 import { withTimeout } from "../utils/async.js";
@@ -190,6 +190,12 @@ export function enrichRetrievalQuery(effectiveQuery: string, historyMessages: St
     userTurns.some((t) => hasDescalingContext(t));
   const descalingFocus =
     sessionDescaling && !currentLeak && !effectiveLeak && !threadedSealingFocus;
+  const sessionHeatingCircuit =
+    hasHeatingCircuitContext(currentMessage) ||
+    hasHeatingCircuitContext(effectiveQuery) ||
+    userTurns.some((t) => hasHeatingCircuitContext(t));
+  const heatingCircuitFocus =
+    sessionHeatingCircuit && !currentLeak && !effectiveLeak && !threadedSealingFocus && !descalingFocus;
 
   let turnsToMerge: string[];
   if (descalingFocus) {
@@ -197,6 +203,13 @@ export function enrichRetrievalQuery(effectiveQuery: string, historyMessages: St
       (t) =>
         hasDescalingContext(t) ||
         /\b(g60|g61|detartrans|aluminium|eau\s+sanitaire|echangeur|pas\s+de\s+fuite)\b/i.test(t) ||
+        (!hasObviousLeakOrPipeDamageIntent(t) && isThinRetrievalQuery(t)),
+    );
+  } else if (heatingCircuitFocus) {
+    turnsToMerge = userTurns.filter(
+      (t) =>
+        hasHeatingCircuitContext(t) ||
+        /\b(g110|g10|g3|g70|inhibiteur|universel|plancher\s+chauffant|desembou)\b/i.test(t) ||
         (!hasObviousLeakOrPipeDamageIntent(t) && isThinRetrievalQuery(t)),
     );
   } else if (threadedSealingFocus) {

@@ -20,6 +20,19 @@ export function hasDescalingContext(text: string): boolean {
   return /\b(detartr|descal|calcaire|tartre|detartrans|echangeur\s+(a\s+)?plaque)\b/.test(n);
 }
 
+/** Entretien circuit chauffage (désembouage, inhibiteur, radiateur…) — pas une pâte à joint filetage. */
+export function hasHeatingCircuitContext(text: string): boolean {
+  const n = normalizeText(text);
+  if (hasDescalingContext(text)) return false;
+  return (
+    /\b(desembou|embouage|inhibiteur|\bg3\b|\bg10\b|\bg70\b|\bg110\b|radiateur|plancher\s+chauffant|plancher\s+chauf|chauffage\s+central|circuit\s+(de\s+)?chauff|circuit\s+ferm|caloporteur|\bglycol\b|neutralisant|nettoyant\s+circuit)\b/.test(
+      n,
+    ) ||
+    (/\b(chauffage|chauf)\b/.test(n) &&
+      /\b(plancher|circuit|inhibiteur|desembou|embouage|radiateur|boue|plancher\s+chauffant)\b/.test(n))
+  );
+}
+
 export function hasObviousLeakOrPipeDamageIntent(text: string): boolean {
   const n = normalizeText(text);
   const leak = /\b(fuite|leak|lek|wyciek|infiltration)\b/.test(n);

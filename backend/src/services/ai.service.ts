@@ -65,7 +65,7 @@ export function buildSystemPrompt(
     goldenExamples && goldenExamples.length > 0
       ? `
 ═══ Examples (Golden Q&A) ═══
-Mimic the structure, tone, and grounding discipline of these validated past answers (do not copy product names unless they fit the current context):
+Mimic the structure, tone, and grounding discipline of these validated past answers (thumbs-up); catalog routing also boosts their products when relevant:
 ${goldenExamples
   .map(
     (ex, i) => `
@@ -81,7 +81,7 @@ ${truncateForPrompt(ex.assistantReply, 520)}`,
     negativeExamples && negativeExamples.length > 0
       ? `
 ═══ Past user dissatisfaction (similar cases) ═══
-These prior exchanges were marked **not helpful** for a similar need. Do NOT repeat the same mistake:
+These prior exchanges were marked **not helpful** for a similar need. Catalog routing already penalizes the listed slugs; do NOT repeat the same mistake:
 - Do not recommend the listed slugs/products unless the current retrieved catalogue blocks clearly support them for THIS case.
 - If retrieval again surfaces only those irrelevant products, explain the gap and ask one focused question instead of forcing a wrong SKU.
 ${negativeExamples

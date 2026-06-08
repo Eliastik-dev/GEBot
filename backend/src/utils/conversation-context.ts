@@ -35,9 +35,9 @@ export function feedbackEmbeddingText(row: {
   search_query?: string | null;
   user_query?: string | null;
 }): string {
-  const sq = row.search_query?.trim() ?? "";
   const uq = row.user_query?.trim() ?? "";
+  const sq = row.search_query?.trim() ?? "";
+  if (uq.length >= 20 && uq.length >= sq.length) return uq;
   if (sq.length >= 24) return sq;
-  if (uq.length >= 24) return uq;
-  return sq || uq;
+  return uq || sq;
 }
