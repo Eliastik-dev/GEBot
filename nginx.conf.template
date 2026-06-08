@@ -5,13 +5,14 @@
 #      sudo ln -sf /etc/nginx/sites-available/gebot /etc/nginx/sites-enabled/gebot
 #      sudo nginx -t && sudo systemctl reload nginx
 #
-# 2. Placeholders:
-#      __SERVER_NAME__   — VM hostname or IP (e.g. gebot-vm.local or 192.168.1.50)
+# 2. Placeholders (replaced automatically by deploy_ubuntu.sh):
+#      __SERVER_NAME__   — Hostname(s) for this site (e.g. gebot.pn2.geb)
+#      __NGINX_PORT__    — Public HTTP port (default 8780 on shared VMs to avoid :80 conflicts)
 #      __DEPLOY_ROOT__   — Absolute path to the cloned repo (e.g. /home/deploy/GEBot)
 #      __BACKEND_PORT__  — Must match PORT in your .env (default: 8787)
 
 server {
-    listen 80;
+    listen __NGINX_PORT__;
     server_name __SERVER_NAME__;
 
     # Compiled widget JS + generated test interface (deploy_ubuntu.sh writes index.html)

@@ -190,18 +190,17 @@ read_env_var() {
 BACKEND_PORT="$(read_env_var PORT)"
 BACKEND_PORT="${BACKEND_PORT:-8787}"
 
+GEBOT_NGINX_PORT="$(read_env_var GEBOT_NGINX_PORT)"
+GEBOT_NGINX_PORT="${GEBOT_NGINX_PORT:-8780}"
+
 GEBOT_SERVER_NAME="$(read_env_var GEBOT_SERVER_NAME)"
-if [[ -z "${GEBOT_SERVER_NAME}" ]]; then
-  VM_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-  VM_HOST="$(hostname -f 2>/dev/null || hostname)"
-  GEBOT_SERVER_NAME="gebot.pn2.geb ${VM_HOST} ${VM_IP}"
-  GEBOT_SERVER_NAME="$(echo "${GEBOT_SERVER_NAME}" | xargs)"
-fi
+GEBOT_SERVER_NAME="${GEBOT_SERVER_NAME:-gebot.pn2.geb}"
 
 generate_nginx_config() {
   sed \
     -e "s|__DEPLOY_ROOT__|${SCRIPT_DIR}|g" \
     -e "s|__SERVER_NAME__|${GEBOT_SERVER_NAME}|g" \
+    -e "s|__NGINX_PORT__|${GEBOT_NGINX_PORT}|g" \
     -e "s|__BACKEND_PORT__|${BACKEND_PORT}|g" \
     nginx.conf.template
 }
@@ -215,12 +214,18 @@ if command -v nginx >/dev/null 2>&1; then
     log "Installing Nginx site configuration..."
     generate_nginx_config | sudo tee /etc/nginx/sites-available/gebot >/dev/null
     sudo ln -sf /etc/nginx/sites-available/gebot /etc/nginx/sites-enabled/gebot
-    if sudo nginx -t >/dev/null 2>&1; then
+    NGINX_TEST_OUTPUT="$(sudo nginx -t 2>&1)" || true
+    if echo "${NGINX_TEST_OUTPUT}" | grep -q "syntax is ok"; then
+      if echo "${NGINX_TEST_OUTPUT}" | grep -q "conflicting server name"; then
+        warn "Nginx reports conflicting server_name — another site already uses this name/port."
+        echo "${NGINX_TEST_OUTPUT}" | grep "conflicting server name" || true
+        warn "Set GEBOT_NGINX_PORT=8780 (default) or a unique GEBOT_SERVER_NAME in .env."
+      fi
       sudo systemctl reload nginx
-      log "Nginx reloaded (server_name: ${GEBOT_SERVER_NAME})."
+      log "Nginx reloaded (http://<host>:${GEBOT_NGINX_PORT}/, server_name: ${GEBOT_SERVER_NAME})."
     else
       warn "Nginx config test failed — fix nginx.conf.generated before reloading."
-      sudo nginx -t || true
+      echo "${NGINX_TEST_OUTPUT}" || true
     fi
   else
     warn "Passwordless sudo unavailable — install Nginx config manually:"
@@ -241,7 +246,8 @@ echo "  - Backend (PM2):  ${APP_NAME} → http://127.0.0.1:${BACKEND_PORT}"
 echo "  - Health check:   http://127.0.0.1:${BACKEND_PORT}/health"
 echo "  - Widget bundle:  ${SCRIPT_DIR}/frontend/dist/gebot-widget.js"
 echo "  - Nginx config:   ${SCRIPT_DIR}/nginx.conf.generated"
-echo "  - server_name:    ${GEBOT_SERVER_NAME}"
+echo "  - Test page URL:  http://<host>:${GEBOT_NGINX_PORT}/  (server_name: ${GEBOT_SERVER_NAME})"
+echo "  - Or via DNS:     http://${GEBOT_SERVER_NAME%% *}/  (add hosts entry if needed)"
 echo ""
 echo "  pm2 status"
 echo "  pm2 logs ${APP_NAME}"
