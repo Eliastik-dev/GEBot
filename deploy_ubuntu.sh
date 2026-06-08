@@ -191,7 +191,7 @@ BACKEND_PORT="$(read_env_var PORT)"
 BACKEND_PORT="${BACKEND_PORT:-8787}"
 
 GEBOT_NGINX_PORT="$(read_env_var GEBOT_NGINX_PORT)"
-GEBOT_NGINX_PORT="${GEBOT_NGINX_PORT:-8780}"
+GEBOT_NGINX_PORT="${GEBOT_NGINX_PORT:-80}"
 
 GEBOT_SERVER_NAME="$(read_env_var GEBOT_SERVER_NAME)"
 GEBOT_SERVER_NAME="${GEBOT_SERVER_NAME:-gebot.pn2.geb}"
@@ -219,7 +219,8 @@ if command -v nginx >/dev/null 2>&1; then
       if echo "${NGINX_TEST_OUTPUT}" | grep -q "conflicting server name"; then
         warn "Nginx reports conflicting server_name — another site already uses this name/port."
         echo "${NGINX_TEST_OUTPUT}" | grep "conflicting server name" || true
-        warn "Set GEBOT_NGINX_PORT=8780 (default) or a unique GEBOT_SERVER_NAME in .env."
+        warn "Use a unique GEBOT_SERVER_NAME (e.g. gebot.pn2.geb) — do not add the VM IP if another site already uses it."
+        warn "Optional fallback: GEBOT_NGINX_PORT=8780 in .env to serve GEBot on a dedicated port."
       fi
       sudo systemctl reload nginx
       log "Nginx reloaded (http://<host>:${GEBOT_NGINX_PORT}/, server_name: ${GEBOT_SERVER_NAME})."
@@ -237,6 +238,11 @@ else
   warn "Nginx not installed — see DEPLOYMENT_GUIDE.md step 5."
 fi
 
+NGINX_PUBLIC_URL="http://${GEBOT_SERVER_NAME%% *}"
+if [[ "${GEBOT_NGINX_PORT}" != "80" ]]; then
+  NGINX_PUBLIC_URL="${NGINX_PUBLIC_URL}:${GEBOT_NGINX_PORT}"
+fi
+
 # ---------------------------------------------------------------------------
 # 10. Summary
 # ---------------------------------------------------------------------------
@@ -246,8 +252,7 @@ echo "  - Backend (PM2):  ${APP_NAME} → http://127.0.0.1:${BACKEND_PORT}"
 echo "  - Health check:   http://127.0.0.1:${BACKEND_PORT}/health"
 echo "  - Widget bundle:  ${SCRIPT_DIR}/frontend/dist/gebot-widget.js"
 echo "  - Nginx config:   ${SCRIPT_DIR}/nginx.conf.generated"
-echo "  - Test page URL:  http://<host>:${GEBOT_NGINX_PORT}/  (server_name: ${GEBOT_SERVER_NAME})"
-echo "  - Or via DNS:     http://${GEBOT_SERVER_NAME%% *}/  (add hosts entry if needed)"
+echo "  - Test page URL:  ${NGINX_PUBLIC_URL}/"
 echo ""
 echo "  pm2 status"
 echo "  pm2 logs ${APP_NAME}"
