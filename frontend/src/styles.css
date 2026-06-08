@@ -7,3 +7,21 @@
   --gebot-blue-dark: rgb(26, 43, 75);
 }
 
+[data-gebot-widget] {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+[data-gebot-widget] .gebot-panel {
+  width: 100%;
+  max-width: min(calc(100vw - 1.5rem), 18.75rem);
+  max-height: min(82dvh, calc(100dvh - 5rem));
+}
+
+@media (min-width: 640px) {
+  [data-gebot-widget] .gebot-panel {
+    width: min(calc(100vw - 2rem), 20rem);
+    max-height: min(78dvh, 36rem);
+  }
+}
+

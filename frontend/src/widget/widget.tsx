@@ -441,16 +441,27 @@ export function Widget({ apiBaseUrl }: Props) {
 
   return (
     <div
-      className={cn("fixed bottom-5 left-5 z-[2147483647] text-[#1A2B4B]")}
+      className={cn(
+        "fixed z-[2147483647] text-[#1A2B4B]",
+        "bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))]",
+        open && "right-[max(0.75rem,env(safe-area-inset-right))] sm:right-auto",
+      )}
       style={{ fontFamily: "Roboto, system-ui, sans-serif" }}
     >
       {!open && (
-        <div
-          className="mb-2 rounded-full bg-white px-3 py-2 text-sm shadow-md"
+        <button
+          type="button"
+          className={cn(
+            "mb-1.5 max-w-[min(calc(100vw-5rem),14rem)] rounded-full bg-white px-2.5 py-1.5",
+            "text-[11px] leading-snug shadow-md sm:text-xs",
+            "cursor-pointer hover:brightness-95 active:brightness-90 transition",
+          )}
           style={{ border: "1px solid rgba(20,102,172,0.35)" }}
+          onClick={() => setOpen(true)}
+          aria-label={t("openChatAria")}
         >
           {t("tooltipQuestion")}
-        </div>
+        </button>
       )}
       <button
         type="button"
@@ -458,7 +469,9 @@ export function Widget({ apiBaseUrl }: Props) {
           "shadow-lg",
           "grid place-items-center overflow-hidden",
           "hover:brightness-95 active:brightness-90 transition",
-          open ? "h-14 w-14 rounded-full" : "h-14 w-[220px] rounded-full bg-white px-3",
+          open
+            ? "h-11 w-11 rounded-full sm:h-12 sm:w-12"
+            : "h-11 w-[min(11rem,calc(100vw-1.5rem))] rounded-full bg-white px-2.5 sm:h-12 sm:w-[12.5rem] sm:px-3",
         )}
         style={open ? { backgroundColor: "rgb(20, 102, 172)" } : { border: "1px solid rgba(20,102,172,0.35)" }}
         onClick={() => setOpen((v) => !v)}
@@ -468,7 +481,7 @@ export function Widget({ apiBaseUrl }: Props) {
           src={open ? chatbotOpenLogo : chatbotClosedLogo}
           alt=""
           aria-hidden="true"
-          className={open ? "h-8 w-8 object-contain" : "h-9 w-full object-contain"}
+          className={open ? "h-6 w-6 object-contain sm:h-7 sm:w-7" : "h-7 w-full object-contain sm:h-8"}
         />
       </button>
 
@@ -476,31 +489,32 @@ export function Widget({ apiBaseUrl }: Props) {
       {open && (
         <div
           className={cn(
-            "absolute bottom-16 left-0 w-[360px] max-w-[calc(100vw-2rem)] sm:w-[390px]",
-            "rounded-2xl shadow-2xl border",
-            "backdrop-blur",
-            "bg-white",
+            "gebot-panel absolute bottom-[calc(2.75rem+env(safe-area-inset-bottom,0px))] left-0 sm:bottom-14",
+            "flex flex-col overflow-hidden",
+            "rounded-xl shadow-2xl border backdrop-blur bg-white sm:rounded-2xl",
           )}
           style={{ borderColor: "rgba(20,102,172,0.35)" }}
         >
           <div
-            className={cn("px-4 py-3 border-b flex items-center justify-between")}
+            className={cn("flex shrink-0 items-center justify-between border-b px-3 py-2 sm:px-3.5 sm:py-2.5")}
             style={{ borderColor: "rgba(20,102,172,0.35)" }}
           >
-            <div className="flex flex-col">
+            <div className="min-w-0 flex-1 pr-2">
               <div
-                className="text-sm font-semibold tracking-tight text-[#1A2B4B]"
+                className="truncate text-xs font-semibold tracking-tight text-[#1A2B4B] sm:text-sm"
                 style={{ fontFamily: "Montserrat, Roboto, system-ui, sans-serif" }}
               >
                 GEBot
               </div>
-              <div className={cn("text-xs text-[#1A2B4B]/70")}>
+              <div className={cn("truncate text-[10px] text-[#1A2B4B]/70 sm:text-[11px]")}>
                 {t("subtitle", { audience: audience ?? t("audienceUnknown") })}
               </div>
             </div>
             <button
               type="button"
-              className={cn("text-xs px-2 py-1 rounded-md border text-[#1A2B4B] hover:bg-[#1466AC]/10")}
+              className={cn(
+                "shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] text-[#1A2B4B] hover:bg-[#1466AC]/10 sm:px-2 sm:py-1 sm:text-xs",
+              )}
               style={{ borderColor: "rgba(20,102,172,0.35)" }}
               onClick={() => setOpen(false)}
             >
@@ -508,21 +522,21 @@ export function Widget({ apiBaseUrl }: Props) {
             </button>
           </div>
 
-          <div ref={listRef} className="h-[420px] overflow-auto px-3 py-3 space-y-3 max-sm:h-[55vh]">
+          <div ref={listRef} className="min-h-0 flex-1 space-y-2 overflow-auto px-2.5 py-2 sm:space-y-2.5 sm:px-3 sm:py-2.5">
             {isChatLocked && (
-              <div className="rounded-xl border border-[#1466AC]/25 bg-[#1466AC]/5 p-3 text-xs text-[#1A2B4B]">
-                <p className="mb-2">{t("geolocationConsentPrompt")}</p>
-                <div className="flex flex-wrap gap-2">
+              <div className="rounded-lg border border-[#1466AC]/25 bg-[#1466AC]/5 p-2 text-[11px] text-[#1A2B4B] sm:rounded-xl sm:p-2.5 sm:text-xs">
+                <p className="mb-1.5 sm:mb-2">{t("geolocationConsentPrompt")}</p>
+                <div className="flex flex-wrap gap-1.5 sm:gap-2">
                   <button
                     type="button"
-                    className="rounded-full bg-[#1466AC] px-3 py-1.5 font-semibold text-white hover:brightness-95"
+                    className="rounded-full bg-[#1466AC] px-2.5 py-1 text-[11px] font-semibold text-white hover:brightness-95 sm:px-3 sm:py-1.5 sm:text-xs"
                     onClick={() => void onGeoConsentPick("accepted")}
                   >
                     {t("allow")}
                   </button>
                   <button
                     type="button"
-                    className="rounded-full border border-[#1A2B4B]/25 bg-white px-3 py-1.5 font-semibold text-[#1A2B4B] hover:bg-[#1A2B4B]/5"
+                    className="rounded-full border border-[#1A2B4B]/25 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#1A2B4B] hover:bg-[#1A2B4B]/5 sm:px-3 sm:py-1.5 sm:text-xs"
                     onClick={() => void onGeoConsentPick("declined")}
                   >
                     {t("decline")}
@@ -540,7 +554,7 @@ export function Widget({ apiBaseUrl }: Props) {
                 <div key={idx} ref={isLastAssistant ? latestAssistantRef : undefined} className={cn("flex flex-col", isUser ? "items-end" : "items-start")}>
                   <div
                     className={cn(
-                      "max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed",
+                      "max-w-[92%] rounded-xl px-2.5 py-1.5 text-xs leading-relaxed sm:max-w-[88%] sm:rounded-2xl sm:px-3 sm:py-2 sm:text-sm",
                       isUser
                         ? "bg-[#1466AC] text-white"
                         : "bg-[#1A2B4B]/5 border text-[#1A2B4B]",
@@ -554,16 +568,16 @@ export function Widget({ apiBaseUrl }: Props) {
                         <ReactMarkdown
                           components={{
                             h3: ({ children }) => (
-                              <h3 className="mt-2 mb-1 text-sm font-semibold text-[#1A2B4B] first:mt-0">{children}</h3>
+                              <h3 className="mt-1.5 mb-0.5 text-xs font-semibold text-[#1A2B4B] first:mt-0 sm:mt-2 sm:mb-1 sm:text-sm">{children}</h3>
                             ),
-                            ul: ({ children }) => <ul className="my-1 list-disc pl-4">{children}</ul>,
-                            li: ({ children }) => <li className="mb-1">{children}</li>,
+                            ul: ({ children }) => <ul className="my-0.5 list-disc pl-3.5 sm:my-1 sm:pl-4">{children}</ul>,
+                            li: ({ children }) => <li className="mb-0.5 sm:mb-1">{children}</li>,
                             a: ({ href, children }) => (
                               <a
                                 href={href}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex rounded-md bg-[#1466AC]/12 px-2 py-1 text-[#1466AC] hover:bg-[#1466AC]/20"
+                                className="inline-flex rounded-md bg-[#1466AC]/12 px-1.5 py-0.5 text-[11px] text-[#1466AC] hover:bg-[#1466AC]/20 sm:px-2 sm:py-1 sm:text-xs"
                               >
                                 {children}
                               </a>
@@ -616,13 +630,12 @@ export function Widget({ apiBaseUrl }: Props) {
               })}
 
             {!isChatLocked && showQuickReplies && !audience && !busy && (
-              <div className="flex flex-wrap gap-2 pt-1">
+              <div className="flex flex-wrap gap-1.5 pt-0.5 sm:gap-2 sm:pt-1">
                 <button
                   type="button"
                   className={cn(
-                    "rounded-full px-3 py-2 text-xs text-white shadow-sm",
-                    "transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md",
-                    "max-sm:flex-1 max-sm:min-w-[48%]",
+                    "min-w-[calc(50%-0.375rem)] flex-1 rounded-full px-2.5 py-1.5 text-[11px] text-white shadow-sm",
+                    "transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md sm:min-w-0 sm:flex-none sm:px-3 sm:py-2 sm:text-xs",
                   )}
                   style={{
                     backgroundColor: "rgb(26, 43, 75)",
@@ -635,9 +648,8 @@ export function Widget({ apiBaseUrl }: Props) {
                 <button
                   type="button"
                   className={cn(
-                    "rounded-full px-3 py-2 text-xs text-white shadow-sm",
-                    "transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md",
-                    "max-sm:flex-1 max-sm:min-w-[48%]",
+                    "min-w-[calc(50%-0.375rem)] flex-1 rounded-full px-2.5 py-1.5 text-[11px] text-white shadow-sm",
+                    "transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md sm:min-w-0 sm:flex-none sm:px-3 sm:py-2 sm:text-xs",
                   )}
                   style={{
                     backgroundColor: "rgb(20, 102, 172)",
@@ -651,14 +663,14 @@ export function Widget({ apiBaseUrl }: Props) {
             )}
 
             {!isChatLocked && showThemeReplies && audience && !theme && !busy && (
-              <div className="flex flex-wrap gap-2 pt-1">
+              <div className="flex flex-wrap gap-1.5 pt-0.5 sm:gap-2 sm:pt-1">
                 {THEME_KEYS.map((key) => (
                   <button
                     key={key}
                     type="button"
                     className={cn(
-                      "rounded-full px-3 py-2 text-xs text-white shadow-sm",
-                      "transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md",
+                      "min-w-[calc(50%-0.375rem)] flex-1 rounded-full px-2.5 py-1.5 text-[11px] text-white shadow-sm",
+                      "transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md sm:min-w-0 sm:flex-none sm:px-3 sm:py-2 sm:text-xs",
                     )}
                     style={{
                       backgroundColor: "rgb(20, 102, 172)",
@@ -673,25 +685,25 @@ export function Widget({ apiBaseUrl }: Props) {
             )}
           </div>
 
-          <div className={cn("p-3 border-t")} style={{ borderColor: "rgba(20,102,172,0.35)" }}>
+          <div className={cn("shrink-0 border-t p-2 sm:p-2.5")} style={{ borderColor: "rgba(20,102,172,0.35)" }}>
             {busy && backendStatus === "searching" && (
-              <div className="mb-2 text-[11px] text-[#1A2B4B]/70">{t("statusSearchingSheets")}</div>
+              <div className="mb-1.5 text-[10px] text-[#1A2B4B]/70 sm:mb-2 sm:text-[11px]">{t("statusSearchingSheets")}</div>
             )}
             {handoff && (
-              <div className="mb-3 rounded-xl border border-[#1466AC]/30 bg-[#1466AC]/10 p-2">
+              <div className="mb-2 rounded-lg border border-[#1466AC]/30 bg-[#1466AC]/10 p-1.5 sm:mb-2.5 sm:rounded-xl sm:p-2">
                 <button
                   type="button"
-                  className="w-full rounded-lg bg-[#1466AC] px-3 py-2 text-sm font-semibold text-white shadow-md hover:brightness-95"
+                  className="w-full rounded-lg bg-[#1466AC] px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-white shadow-md hover:brightness-95 sm:px-3 sm:py-2 sm:text-xs"
                   onClick={() => window.open(`tel:${handoff.phone.replace(/\s+/g, "")}`, "_self")}
                 >
                   {handoff.label}: {handoff.phone}
                 </button>
               </div>
             )}
-            <div className="flex gap-2">
+            <div className="flex gap-1.5 max-[340px]:flex-col sm:gap-2">
               <input
                 className={cn(
-                  "flex-1 rounded-xl px-3 py-2 text-sm outline-none",
+                  "min-w-0 flex-1 rounded-lg px-2.5 py-1.5 text-xs outline-none sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm",
                   "bg-white border text-[#1A2B4B]",
                   "placeholder:text-[#1A2B4B]/60",
                 )}
@@ -707,7 +719,7 @@ export function Widget({ apiBaseUrl }: Props) {
               <button
                 type="button"
                 className={cn(
-                  "rounded-xl px-3 py-2 text-sm font-semibold",
+                  "shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold max-[340px]:w-full sm:rounded-xl sm:px-3 sm:py-2 sm:text-sm",
                   canSend ? "text-white" : "bg-[#1A2B4B]/20 text-[#1A2B4B]/60",
                 )}
                 style={canSend ? { backgroundColor: "rgb(20, 102, 172)" } : undefined}
@@ -717,8 +729,8 @@ export function Widget({ apiBaseUrl }: Props) {
                 {t("send")}
               </button>
             </div>
-            <div className={cn("mt-2 space-y-2")}>
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px] text-[#1A2B4B]/70">
+            <div className={cn("mt-1.5 space-y-1.5 sm:mt-2 sm:space-y-2")}>
+              <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[10px] text-[#1A2B4B]/70 sm:gap-x-2 sm:gap-y-1 sm:text-[11px]">
                 <span className="inline-flex flex-wrap items-baseline gap-1">
                   <span style={{ fontFamily: "Montserrat, Roboto, system-ui, sans-serif" }}>{t("profile")}:</span>
                   <span className="text-[#1466AC]">
@@ -757,13 +769,13 @@ export function Widget({ apiBaseUrl }: Props) {
               </div>
 
               {footerEditMode === "profile" && !busy && !isChatLocked && (
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1 sm:gap-1.5">
                   {(["professional", "particulier"] as const).map((key) => (
                     <button
                       key={key}
                       type="button"
                       className={cn(
-                        "rounded-full px-2.5 py-1.5 text-[11px] font-medium shadow-sm transition-colors",
+                        "min-w-[calc(50%-0.25rem)] flex-1 rounded-full px-2 py-1 text-[10px] font-medium shadow-sm transition-colors sm:min-w-0 sm:flex-none sm:px-2.5 sm:py-1.5 sm:text-[11px]",
                         audience === key
                           ? "bg-[#1466AC] text-white"
                           : "border border-[#1466AC]/35 bg-white text-[#1466AC] hover:bg-[#1466AC]/10",
@@ -777,13 +789,13 @@ export function Widget({ apiBaseUrl }: Props) {
               )}
 
               {footerEditMode === "domain" && !busy && !isChatLocked && (
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1 sm:gap-1.5">
                   {THEME_KEYS.map((key) => (
                     <button
                       key={key}
                       type="button"
                       className={cn(
-                        "rounded-full px-2.5 py-1.5 text-[11px] font-medium shadow-sm transition-colors max-sm:min-w-[calc(50%-0.375rem)] max-sm:flex-1",
+                        "min-w-[calc(50%-0.25rem)] flex-1 rounded-full px-2 py-1 text-[10px] font-medium shadow-sm transition-colors sm:min-w-0 sm:flex-none sm:px-2.5 sm:py-1.5 sm:text-[11px]",
                         theme === key
                           ? "bg-[#1466AC] text-white"
                           : "border border-[#1466AC]/35 bg-white text-[#1466AC] hover:bg-[#1466AC]/10",
@@ -797,10 +809,10 @@ export function Widget({ apiBaseUrl }: Props) {
               )}
             </div>
             {!isChatLocked && (
-              <div className="mt-2">
+              <div className="mt-1.5 sm:mt-2">
                 <button
                   type="button"
-                  className="rounded-md border border-[#1466AC]/35 px-2 py-1 text-[11px] text-[#1466AC] hover:bg-[#1466AC]/10"
+                  className="rounded-md border border-[#1466AC]/35 px-1.5 py-0.5 text-[10px] text-[#1466AC] hover:bg-[#1466AC]/10 sm:px-2 sm:py-1 sm:text-[11px]"
                   onClick={reopenGeolocationConsent}
                 >
                   {t("updateLocationPreference")}
