@@ -4,4 +4,5 @@ dist/
 backend/.env
 frontend/.env
 .env
+nginx.conf.generated
 supabase/

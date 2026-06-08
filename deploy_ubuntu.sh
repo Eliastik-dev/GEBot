@@ -181,17 +181,67 @@ pm2 save
 log "PM2 process list saved."
 
 # ---------------------------------------------------------------------------
-# 9. Summary
+# 9. Generate Nginx configuration (placeholders replaced)
 # ---------------------------------------------------------------------------
-BACKEND_PORT="$(grep -E '^PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+read_env_var() {
+  grep -E "^${1}=" "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true
+}
+
+BACKEND_PORT="$(read_env_var PORT)"
 BACKEND_PORT="${BACKEND_PORT:-8787}"
 
+GEBOT_SERVER_NAME="$(read_env_var GEBOT_SERVER_NAME)"
+if [[ -z "${GEBOT_SERVER_NAME}" ]]; then
+  VM_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  VM_HOST="$(hostname -f 2>/dev/null || hostname)"
+  GEBOT_SERVER_NAME="gebot.pn2.geb ${VM_HOST} ${VM_IP}"
+  GEBOT_SERVER_NAME="$(echo "${GEBOT_SERVER_NAME}" | xargs)"
+fi
+
+generate_nginx_config() {
+  sed \
+    -e "s|__DEPLOY_ROOT__|${SCRIPT_DIR}|g" \
+    -e "s|__SERVER_NAME__|${GEBOT_SERVER_NAME}|g" \
+    -e "s|__BACKEND_PORT__|${BACKEND_PORT}|g" \
+    nginx.conf.template
+}
+
+log "Generating Nginx configuration (nginx.conf.generated)..."
+generate_nginx_config > nginx.conf.generated
+log "Wrote ${SCRIPT_DIR}/nginx.conf.generated"
+
+if command -v nginx >/dev/null 2>&1; then
+  if sudo -n true 2>/dev/null; then
+    log "Installing Nginx site configuration..."
+    generate_nginx_config | sudo tee /etc/nginx/sites-available/gebot >/dev/null
+    sudo ln -sf /etc/nginx/sites-available/gebot /etc/nginx/sites-enabled/gebot
+    if sudo nginx -t >/dev/null 2>&1; then
+      sudo systemctl reload nginx
+      log "Nginx reloaded (server_name: ${GEBOT_SERVER_NAME})."
+    else
+      warn "Nginx config test failed — fix nginx.conf.generated before reloading."
+      sudo nginx -t || true
+    fi
+  else
+    warn "Passwordless sudo unavailable — install Nginx config manually:"
+    echo "  sudo cp nginx.conf.generated /etc/nginx/sites-available/gebot"
+    echo "  sudo ln -sf /etc/nginx/sites-available/gebot /etc/nginx/sites-enabled/gebot"
+    echo "  sudo nginx -t && sudo systemctl reload nginx"
+  fi
+else
+  warn "Nginx not installed — see DEPLOYMENT_GUIDE.md step 5."
+fi
+
+# ---------------------------------------------------------------------------
+# 10. Summary
+# ---------------------------------------------------------------------------
 echo ""
 log "Deployment complete."
 echo "  - Backend (PM2):  ${APP_NAME} → http://127.0.0.1:${BACKEND_PORT}"
 echo "  - Health check:   http://127.0.0.1:${BACKEND_PORT}/health"
 echo "  - Widget bundle:  ${SCRIPT_DIR}/frontend/dist/gebot-widget.js"
-echo "  - Test page:      configure Nginx to serve ${SCRIPT_DIR}/frontend/dist/"
+echo "  - Nginx config:   ${SCRIPT_DIR}/nginx.conf.generated"
+echo "  - server_name:    ${GEBOT_SERVER_NAME}"
 echo ""
 echo "  pm2 status"
 echo "  pm2 logs ${APP_NAME}"

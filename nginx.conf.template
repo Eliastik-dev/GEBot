@@ -12,7 +12,7 @@
 
 server {
     listen 80;
-    server_name gebot.pn2.geb;
+    server_name __SERVER_NAME__;
 
     # Compiled widget JS + generated test interface (deploy_ubuntu.sh writes index.html)
     root __DEPLOY_ROOT__/frontend/dist;
