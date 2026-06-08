@@ -21,12 +21,3 @@ window.GEB_CHATBOT_WIDGET = {
   mount: mountGebWidget,
 };
 
-// Auto-mount in dev if #root exists
-const root = document.getElementById("root");
-if (root) {
-  mountGEBotWidget({
-    target: root,
-    apiBaseUrl: "http://localhost:8787",
-  });
-}
-
