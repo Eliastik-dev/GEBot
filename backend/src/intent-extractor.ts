@@ -72,6 +72,7 @@ import {
 import {
   hasDescalingContext,
   hasObviousLeakOrPipeDamageIntent,
+  isBuildingEnvelopeLeakContext,
   isPersonalDrinkwareOutOfCatalog,
 } from "./utils/diagnostic-rules.js";
 
@@ -178,13 +179,46 @@ function leakRequiresPressureContext(
   );
 }
 
+function applyBuildingEnvelopeLeakEnrichment(merged: ExtractedMetadata, conversationText: string): void {
+  if (!isBuildingEnvelopeLeakContext(conversationText)) return;
+
+  if (
+    ["leak_repair", "pipe_repair", "inaccessible_leak", "general_technical"].includes(merged.intent)
+  ) {
+    merged.intent = "sealing_assembly";
+  }
+
+  const t = normalizeExtractionText(conversationText);
+  if (!merged.material) {
+    if (/\bzinc\b/.test(t)) merged.material = "zinc";
+    else if (/\b(carrelage|terrasse)\b/.test(t)) merged.material = "carrelage";
+    else if (/\b(beton|dalle)\b/.test(t)) merged.material = "beton";
+    else if (/\b(facade|mur|bardage)\b/.test(t)) merged.material = "facade";
+    else if (/\b(tuile|ardoise)\b/.test(t)) merged.material = "tuile";
+  }
+
+  merged.fluid = null;
+  merged.missing_params = merged.missing_params.filter(
+    (p) => !["fluid", "diameter", "pressure", "joint_service_fluid"].includes(p),
+  );
+  merged.needs_clarification = merged.missing_params.length > 0;
+
+  const extraSynonyms = ["etancheite batiment", "mastic facade"];
+  if (/\b(zinc|zinguerie|gouttiere|toiture)\b/.test(t)) {
+    extraSynonyms.push("ms zinc", "mastic zinc", "etancheite toiture", "toiturol", "gebetanche toiture");
+  }
+  merged.synonyms = [
+    ...new Set([...buildSynonyms(merged.intent, null, merged.material), ...extraSynonyms]),
+  ];
+}
+
 function resolveLeakMissingParams(
   merged: ExtractedMetadata,
   conversationText: string,
   faucetLeak: boolean,
 ): string[] {
   const missing: string[] = [];
-  if (!merged.fluid) missing.push("fluid");
+  if (!merged.fluid && !isBuildingEnvelopeLeakContext(conversationText)) missing.push("fluid");
   if (
     leakRequiresPipeDimensions(merged.intent, conversationText, merged) &&
     !merged.diameter &&
@@ -624,6 +658,7 @@ export async function runDiagnosticAnalysis(
       };
     }
     const isLeakLikeFb = ["leak_repair", "pipe_repair", "inaccessible_leak"].includes(fallback.intent);
+    applyBuildingEnvelopeLeakEnrichment(m, conversationText);
     if (descalingContext) {
       applyDescalingSanitizer(m, conversationText);
       return {
@@ -638,11 +673,15 @@ export async function runDiagnosticAnalysis(
         clarification_message: m.needs_clarification ? buildClarificationFromMetadata(m, locale) : null,
       };
     }
+    enrichLeakMetadataFromConversation(m, fallback, conversationText);
+    const faucetLeakFb =
+      FAUCET_LEAK_PATTERN.test(normalizeExtractionText(conversationText)) &&
+      /\b(fuit|fuite|goutte|goutter|infiltration)\b/.test(normalizeExtractionText(conversationText));
+    m.missing_params = resolveLeakMissingParams(m, conversationText, faucetLeakFb);
+    m.needs_clarification = m.missing_params.length > 0;
     return {
-      metadata: fallback,
-      clarification_message: fallback.needs_clarification
-        ? buildClarificationFromMetadata(fallback, locale)
-        : null,
+      metadata: m,
+      clarification_message: m.needs_clarification ? buildClarificationFromMetadata(m, locale) : null,
     };
   }
 
@@ -708,6 +747,7 @@ export async function runDiagnosticAnalysis(
   } else if (descalingContext) {
     applyDescalingSanitizer(merged, conversationText);
   } else {
+    applyBuildingEnvelopeLeakEnrichment(merged, conversationText);
     const isLeakLike = ["leak_repair", "pipe_repair", "inaccessible_leak"].includes(merged.intent);
     if (isLeakLike) {
       enrichLeakMetadataFromConversation(merged, fallback, conversationText);

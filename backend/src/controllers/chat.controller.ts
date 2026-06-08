@@ -370,14 +370,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           );
 
       if (extractedMeta.needs_clarification && diagnosticResult.clarification_message) {
-        const clarificationBody = diagnosticResult.clarification_message;
-        const amazonSection = buildAmazonSection(locale, {
-          productName: null,
-          amazonUrl: getAmazonDefaultUrl(locale, null),
-        });
-        const resellers = locale === "pl" ? [] : await getCachedResellers().catch(() => []);
-        const resellerSection = locale === "pl" ? "" : buildResellerSection(locale, resellers);
-        const response = [clarificationBody, resellerSection, amazonSection].filter(Boolean).join("\n\n");
+        const response = diagnosticResult.clarification_message;
         startSse(res);
         sseWrite(res, { delta: response, sessionId, audience }, "chunk");
         await saveMessage(sessionId, "assistant", response, {

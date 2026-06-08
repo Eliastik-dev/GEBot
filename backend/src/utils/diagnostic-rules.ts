@@ -106,3 +106,23 @@ export function isPurePipeLeakDamageTurn(content: string): boolean {
   return hasObviousLeakOrPipeDamageIntent(content) && !isThreadedJointOrLiquidSealingTopic(content);
 }
 
+/** Fuite / infiltration sur enveloppe du bâtiment — pas de fluide de canalisation à préciser. */
+export function isBuildingEnvelopeLeakContext(text: string): boolean {
+  const n = normalizeText(text);
+  if (!/\b(fuit|fuite|infiltration|goutte|etancheite)\b/.test(n)) return false;
+
+  const plumbingContext =
+    /\b(tuyau|tube|canalisation|pipe|pvc|cuivre|pehd|multicouche|raccord|conduit|robinet|mousseur|mitigeur|lavabo|evier|evacuation|egout|skimmer|refoulement)\b/.test(
+      n,
+    );
+  if (plumbingContext) return false;
+
+  const buildingSurface =
+    /\b(toiture|toit|zinc|zinguerie|gouttiere|gouttieres|facade|bardage|membrane|etancheite|charpente|couverture|descente\s+pluviale|terrasse|carrelage|mur|tuile|ardoise)\b/.test(
+      n,
+    );
+  const buildingThemeOnly = /\b(batiment|building)\b/.test(n);
+
+  return buildingSurface || buildingThemeOnly;
+}
+
