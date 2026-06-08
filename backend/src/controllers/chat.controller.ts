@@ -16,7 +16,7 @@ import { findSimilarNegativeFeedback } from "../services/negative-examples.servi
 import { ensureSession, getSessionTheme, loadRecentMessages, logProblemEvent, logProductAnalytics, logQuery, saveMessage, updateSessionAudience, updateSessionTheme } from "../services/database.service.js";
 import { scheduleJudgeEvaluation, type JudgeInput } from "../services/judge.service.js";
 import { buildSearchQuery, buildThemeAwareSearchQuery, capContextNodes, enrichRetrievalQuery, extractSourceUrlsFromNodes, getCachedResellers, mergeRetrievalNodes, prioritizeTechnicalSheets, summarizeNodeForDebug, AUTOMOTIVE_EXHAUST_SUPPLEMENT_QUERY } from "../services/rag.service.js";
-import { hasDescalingContext, isPersonalDrinkwareOutOfCatalog } from "../utils/diagnostic-rules.js";
+import { hasDescalingContext, isBuildingEnvelopeLeakContext, isPersonalDrinkwareOutOfCatalog } from "../utils/diagnostic-rules.js";
 import { countProductKnowledge, searchProductKnowledge } from "../services/product-knowledge.service.js";
 import {
   buildRetrieverNodesFromProductKnowledge,
@@ -312,6 +312,24 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       });
 
       const conversationFull = `${preAnalysisTranscript}\n${message}`;
+      if (
+        extractedMeta.needs_clarification &&
+        isBuildingEnvelopeLeakContext(conversationFull) &&
+        extractedMeta.missing_params.every((p) => p === "fluid")
+      ) {
+        extractedMeta.needs_clarification = false;
+        extractedMeta.missing_params = [];
+        extractedMeta.fluid = null;
+        if (
+          ["leak_repair", "pipe_repair", "inaccessible_leak", "general_technical"].includes(
+            extractedMeta.intent,
+          )
+        ) {
+          extractedMeta.intent = "sealing_assembly";
+        }
+        console.log("[/api/chat] building_envelope_bypass", { sessionId, intent: extractedMeta.intent });
+      }
+
       if (isPersonalDrinkwareOutOfCatalog(conversationFull)) {
         const drinkwareReply = buildPersonalDrinkwareOutOfScopeReply(locale, audience);
         const escalationSection = buildEscalationSection(locale, audience);
@@ -373,7 +391,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         const response = diagnosticResult.clarification_message;
         startSse(res);
         sseWrite(res, { delta: response, sessionId, audience }, "chunk");
-        await saveMessage(sessionId, "assistant", response, {
+        const assistantMsgId = await saveMessage(sessionId, "assistant", response, {
           metadata_extracted: extractedMeta,
           intent: extractedMeta.intent,
         });
@@ -389,7 +407,11 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.diagnostic_clarification",
         );
-        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        sseWrite(
+          res,
+          { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry, messageId: assistantMsgId },
+          "done",
+        );
         res.end();
         return;
       }

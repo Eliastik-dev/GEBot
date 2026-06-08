@@ -162,6 +162,13 @@ EOF
 log "Building backend..."
 npm run build --prefix backend
 
+DEPLOY_COMMIT="$(git rev-parse --short HEAD)"
+DEPLOY_BUILT_AT="$(date -Iseconds)"
+cat > backend/dist/build-info.json <<EOF
+{"commit":"${DEPLOY_COMMIT}","builtAt":"${DEPLOY_BUILT_AT}"}
+EOF
+log "Build stamp: commit ${DEPLOY_COMMIT} at ${DEPLOY_BUILT_AT}"
+
 if [[ ! -f "backend/dist/server.js" ]]; then
   fail "Backend build failed — backend/dist/server.js was not created."
 fi
@@ -248,6 +255,10 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 log "Deployment complete."
+echo "  - Git commit:     ${DEPLOY_COMMIT}"
+echo "  - Backend build:  ${DEPLOY_BUILT_AT}"
+echo "  - Verify deploy:  curl -s http://127.0.0.1:${BACKEND_PORT}/health | head -c 400"
+echo "    (commit + supabase + productKnowledgeFr must match expectations)"
 echo "  - Backend (PM2):  ${APP_NAME} → http://127.0.0.1:${BACKEND_PORT}"
 echo "  - Health check:   http://127.0.0.1:${BACKEND_PORT}/health"
 echo "  - Widget bundle:  ${SCRIPT_DIR}/frontend/dist/gebot-widget.js"

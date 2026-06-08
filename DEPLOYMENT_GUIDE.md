@@ -238,6 +238,43 @@ cd ~/GEBot
 
 `deploy_ubuntu.sh` runs `pm2 reload ecosystem.config.js` when the process is already running, enabling zero-downtime restarts.
 
+> **Important — `git pull` alone is not enough.**  
+> The server runs the **compiled** backend (`backend/dist/server.js`), not the TypeScript sources.  
+> If you only run `git pull` without rebuilding, PM2 keeps serving the **previous build** — fixes in `src/` will not apply.  
+> Local dev uses `tsx watch` (live sources); production always needs `npm run build --prefix backend` + `pm2 reload`.
+
+### Verify the running version
+
+```bash
+curl -s http://127.0.0.1:8787/health
+```
+
+Example healthy response:
+
+```json
+{
+  "ok": true,
+  "commit": "56a0e18",
+  "builtAt": "2026-06-08T14:30:00+02:00",
+  "supabase": true,
+  "productKnowledgeFr": 217,
+  "productKnowledgeEnabled": true
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `commit` | Git revision actually deployed (must match `git log -1 --oneline` on the VM) |
+| `supabase` | `false` → wrong URL/key or network issue; chat may work but sessions/feedback fail |
+| `productKnowledgeFr` | `0` or `null` → catalog empty; responses are slower and less accurate (vector-only fallback) |
+
+Rebuild the **frontend widget** too when UI changes (thumbs up/down live in `gebot-widget.js`):
+
+```bash
+npm run build --prefix frontend
+sudo systemctl reload nginx   # if Nginx serves the widget
+```
+
 ---
 
 ## Troubleshooting
@@ -248,6 +285,9 @@ cd ~/GEBot
 | `Missing required env var` in PM2 logs | Required keys absent from `.env` (`MISTRAL_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `WP_URL`) |
 | `502 Bad Gateway` from Nginx | `pm2 status` — is `gebot-backend` online? Does `PORT` in `.env` match `__BACKEND_PORT__` in Nginx? |
 | Widget loads but chat fails | Browser devtools → Network → `/api/chat` response; check `pm2 logs gebot-backend` |
+| Fixes on GitHub but not on server | You likely ran `git pull` only — run `./deploy_ubuntu.sh` and check `curl /health` commit hash |
+| No thumbs up/down on answers | Rebuild frontend widget; backend must send `messageId` in SSE `done` event; Supabase must accept inserts |
+| Slow responses | Check `/health` → `productKnowledgeFr` (should be ~200+); empty catalog forces heavy vector RAG + LLM |
 | `git pull` authentication error | Re-run `ssh -T git@github.com`; verify deploy key on GitHub |
 
 Useful commands:
