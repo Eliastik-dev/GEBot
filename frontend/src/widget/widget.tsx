@@ -690,15 +690,13 @@ export function Widget({ apiBaseUrl }: Props) {
               <div className="mb-1.5 text-[10px] text-[#1A2B4B]/70 sm:mb-2 sm:text-[11px]">{t("statusSearchingSheets")}</div>
             )}
             {handoff && (
-              <div className="mb-2 rounded-lg border border-[#1466AC]/30 bg-[#1466AC]/10 p-1.5 sm:mb-2.5 sm:rounded-xl sm:p-2">
-                <button
-                  type="button"
-                  className="w-full rounded-lg bg-[#1466AC] px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-white shadow-md hover:brightness-95 sm:px-3 sm:py-2 sm:text-xs"
-                  onClick={() => window.open(`tel:${handoff.phone.replace(/\s+/g, "")}`, "_self")}
-                >
-                  {handoff.label}: {handoff.phone}
-                </button>
-              </div>
+              <button
+                type="button"
+                className="mb-1.5 w-full truncate rounded-md bg-[#1466AC] px-2 py-0.5 text-[10px] font-semibold leading-tight text-white hover:brightness-95 sm:mb-2 sm:text-[11px]"
+                onClick={() => window.open(`tel:${handoff.phone.replace(/\s+/g, "")}`, "_self")}
+              >
+                {handoff.label}: {handoff.phone}
+              </button>
             )}
             <div className="flex gap-1.5 max-[340px]:flex-col sm:gap-2">
               <input
@@ -730,16 +728,23 @@ export function Widget({ apiBaseUrl }: Props) {
               </button>
             </div>
             <div className={cn("mt-1.5 space-y-1.5 sm:mt-2 sm:space-y-2")}>
-              <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[10px] text-[#1A2B4B]/70 sm:gap-x-2 sm:gap-y-1 sm:text-[11px]">
-                <span className="inline-flex flex-wrap items-baseline gap-1">
-                  <span style={{ fontFamily: "Montserrat, Roboto, system-ui, sans-serif" }}>{t("profile")}:</span>
-                  <span className="text-[#1466AC]">
+              <div
+                className={cn(
+                  "text-[10px] text-[#1A2B4B]/70 sm:text-[11px]",
+                  audience ? "grid grid-cols-2 gap-x-3" : "flex items-baseline",
+                )}
+              >
+                <span className="inline-flex min-w-0 items-baseline gap-1">
+                  <span className="shrink-0" style={{ fontFamily: "Montserrat, Roboto, system-ui, sans-serif" }}>
+                    {t("profile")}:
+                  </span>
+                  <span className="truncate text-[#1466AC]">
                     {audience ? t(`audience.${audience}`) : t("audienceUnknown")}
                   </span>
                   {audience && !busy && !isChatLocked && (
                     <button
                       type="button"
-                      className="rounded px-1 text-[#1466AC] underline decoration-[#1466AC]/40 underline-offset-2 hover:bg-[#1466AC]/10"
+                      className="shrink-0 rounded px-1 text-[#1466AC] underline decoration-[#1466AC]/40 underline-offset-2 hover:bg-[#1466AC]/10"
                       onClick={() => toggleFooterEditMode("profile")}
                     >
                       {t("change")}
@@ -747,24 +752,21 @@ export function Widget({ apiBaseUrl }: Props) {
                   )}
                 </span>
                 {audience && (
-                  <>
-                    <span className="hidden min-[340px]:inline text-[#1A2B4B]/25" aria-hidden="true">
-                      ·
+                  <span className="inline-flex min-w-0 items-baseline gap-1">
+                    <span className="shrink-0" style={{ fontFamily: "Montserrat, Roboto, system-ui, sans-serif" }}>
+                      {t("domain")}:
                     </span>
-                    <span className="inline-flex flex-wrap items-baseline gap-1">
-                      <span style={{ fontFamily: "Montserrat, Roboto, system-ui, sans-serif" }}>{t("domain")}:</span>
-                      <span className="text-[#1466AC]">{theme ? themeLabel(theme) : t("domainUnknown")}</span>
-                      {!busy && !isChatLocked && (
-                        <button
-                          type="button"
-                          className="rounded px-1 text-[#1466AC] underline decoration-[#1466AC]/40 underline-offset-2 hover:bg-[#1466AC]/10"
-                          onClick={() => toggleFooterEditMode("domain")}
-                        >
-                          {t("change")}
-                        </button>
-                      )}
-                    </span>
-                  </>
+                    <span className="truncate text-[#1466AC]">{theme ? themeLabel(theme) : t("domainUnknown")}</span>
+                    {!busy && !isChatLocked && (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded px-1 text-[#1466AC] underline decoration-[#1466AC]/40 underline-offset-2 hover:bg-[#1466AC]/10"
+                        onClick={() => toggleFooterEditMode("domain")}
+                      >
+                        {t("change")}
+                      </button>
+                    )}
+                  </span>
                 )}
               </div>
 

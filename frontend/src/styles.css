@@ -14,13 +14,13 @@
 
 [data-gebot-widget] .gebot-panel {
   width: 100%;
-  max-width: min(calc(100vw - 1.5rem), 18.75rem);
+  max-width: min(calc(100vw - 1.5rem), 22rem);
   max-height: min(82dvh, calc(100dvh - 5rem));
 }
 
 @media (min-width: 640px) {
   [data-gebot-widget] .gebot-panel {
-    width: min(calc(100vw - 2rem), 20rem);
+    width: min(calc(100vw - 2rem), 26rem);
     max-height: min(78dvh, 36rem);
   }
 }
