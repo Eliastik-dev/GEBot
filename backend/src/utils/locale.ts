@@ -47,10 +47,25 @@ export function detectTheme(message: string): ProductTheme | null {
 }
 
 
+/** Quick-reply theme labels (widget) — not free-text technical questions mentioning a domain word. */
+const THEME_PICKER_LABEL_RE =
+  /^(plomberie(\s*\/\s*sanitaire)?|sanitaire|piscine|chauffage|batiment|maintenance|automobile|auto|eco[- ]?conception|plumbing(\s*\/\s*sanitary)?|building|heating|pool|gebouw|budownictwo|loodgieterij(\s*\/\s*sanitair)?|hydraulika(\s*\/\s*sanitarne)?)\s*$/i;
+
+/** Verbs / needs that indicate a real technical question, not a domain picker tap. */
+const THEME_SELECTION_TECHNICAL_INTENT_RE =
+  /\b(souhaite|voudrais|cherch|besoin|comment|quel|quelle|pourquoi|fuit|fuite|repar|etanch|colmat|produit|recommand|probleme|question|faire|installer|coller|utiliser|perd|coule|gouttiere|fissure|trou|colle|mastic|silicone|joint|raccord)\b/;
+
 export function isThemeOnlyMessage(message: string): boolean {
-  const m = message.trim().toLowerCase();
-  const words = m.split(/\s+/).length;
-  return detectTheme(message) !== null && words <= 5;
+  const m = message
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (!detectTheme(message)) return false;
+  if (THEME_PICKER_LABEL_RE.test(m)) return true;
+  if (THEME_SELECTION_TECHNICAL_INTENT_RE.test(m)) return false;
+  const words = m.split(/\s+/).filter(Boolean).length;
+  return words <= 3;
 }
 
 
