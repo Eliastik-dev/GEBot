@@ -238,6 +238,17 @@ export const RETRIEVAL_REGRESSION_CASES: RetrievalRegressionCase[] = [
     intent: "inaccessible_leak",
   },
   {
+    id: "pate-joint-eau-potable-nom-produit",
+    locale: "fr",
+    theme: "maintenance",
+    audience: "particulier",
+    query: "je cherche une pate a joint pour eau potable",
+    fluid: "eau",
+    expectedSlugs: ["pate-a-joint-eau-potable"],
+    forbiddenSlugs: ["gebsoplast", "detecteur-gaz", "colle-haute-performance"],
+    intent: "sealing_assembly",
+  },
+  {
     id: "gourde-fuite-hors-plomberie",
     locale: "fr",
     theme: "plomberie",

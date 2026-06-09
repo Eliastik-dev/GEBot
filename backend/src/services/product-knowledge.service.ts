@@ -24,6 +24,8 @@ import {
   hasNamedProductCitation,
   isExplicitProductLookupQuery,
   matchesCatalogCodeTerm,
+  EXPLICIT_PRODUCT_NAME_PRIORITY_MIN,
+  productHasStrongExplicitMatch,
   resolveDirectTechnicalSheetProduct,
 } from "../utils/product-mention.js";
 
@@ -205,11 +207,9 @@ function scoreProduct(
     if (/\buniversel\b/.test(q) && (slug.includes("g110") || title.includes("universel"))) score += 18;
   }
 
-  const directProductLookup = explicitTexts.some(isExplicitProductLookupQuery);
-  if (directProductLookup) {
-    const explicitScore = computeExplicitProductMatchScore(product, explicitTexts);
-    if (explicitScore > 0) score += explicitScore;
-  }
+  const explicitScore = computeExplicitProductMatchScore(product, explicitTexts);
+  if (explicitScore >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN) score += explicitScore;
+  else if (explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN) score += Math.round(explicitScore * 0.35);
 
   const normMaterial = material ? normalizeText(material) : "";
   if (normMaterial) {
@@ -389,6 +389,7 @@ const NAME_KEYWORD_PATTERNS: Array<{ pattern: RegExp; term: string }> = [
   { pattern: /\b(gouttiere|gouttieres|descente\s+pluviale|zinguerie)\b/i, term: "zinc" },
   { pattern: /\bms[\s*-]?zinc\b/i, term: "ms-zinc" },
   { pattern: /\btoiturol\b/i, term: "toiturol" },
+  { pattern: /\b(galvanis|galvageb|galva)\b/i, term: "galv" },
 ];
 
 function extractNameSearchTerms(
@@ -411,7 +412,6 @@ function extractNameSearchTerms(
       terms.add("tous");
       terms.add("fluides");
     }
-    return [...terms];
   }
 
   if (/\buniversel\b/.test(q) && /\b(inhibiteur|desembou|chauffage|plancher|radiateur|g110|g10\b)\b/.test(q)) {
@@ -438,10 +438,8 @@ function extractNameSearchTerms(
   for (const code of extractCatalogProductCodes(query)) {
     terms.add(code);
   }
-  if (isExplicitProductLookupQuery(query)) {
-    for (const term of extractProductSearchTerms([query])) {
-      terms.add(term);
-    }
+  for (const term of extractProductSearchTerms([query])) {
+    terms.add(term);
   }
   for (const tag of tags) {
     if (tag === "toiture") {
@@ -573,9 +571,11 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
     merged.set(row.slug, row);
   }
 
-  let candidates = [...merged.values()].filter((p) =>
-    !input.audience ||
-    catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
+  let candidates = [...merged.values()].filter(
+    (p) =>
+      !input.audience ||
+      productHasStrongExplicitMatch(p, explicitTexts) ||
+      catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
   );
 
   if (candidates.length === 0 && tags.length > 0) {
@@ -588,9 +588,11 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
       if (error.code === "PGRST205") return [];
       throw error;
     }
-    candidates = ((data as ProductKnowledgeRow[]) ?? []).filter((p) =>
-      !input.audience ||
-      catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
+    candidates = ((data as ProductKnowledgeRow[]) ?? []).filter(
+      (p) =>
+        !input.audience ||
+        productHasStrongExplicitMatch(p, explicitTexts) ||
+        catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
     );
   }
 
@@ -619,20 +621,20 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
       (item) =>
         item.score > 0 ||
         explicitSlugs.has(item.product.slug) ||
-        (directProductLookup && item.explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN),
+        item.explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN,
     )
     .sort((a, b) => {
-      if (directProductLookup && b.explicitScore !== a.explicitScore) {
-        return b.explicitScore - a.explicitScore;
+      const aStrong = a.explicitScore >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN;
+      const bStrong = b.explicitScore >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN;
+      if (bStrong || aStrong) {
+        if (b.explicitScore !== a.explicitScore) return b.explicitScore - a.explicitScore;
       }
       return b.score - a.score;
     });
 
   if (scored.length === 0) return [];
 
-  const strongExplicit = directProductLookup
-    ? scored.filter((item) => item.explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN)
-    : [];
+  const strongExplicit = scored.filter((item) => item.explicitScore >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN);
   if (strongExplicit.length > 0) {
     return strongExplicit.slice(0, limit).map((item) => item.product);
   }

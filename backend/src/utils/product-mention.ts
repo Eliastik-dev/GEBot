@@ -1,6 +1,8 @@
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { decodeHtmlEntities } from "./text.js";
 export const EXPLICIT_PRODUCT_MATCH_MIN = 40;
+/** Score needed to reorder results purely by product-name match (avoids weak partial hits). */
+export const EXPLICIT_PRODUCT_NAME_PRIORITY_MIN = 48;
 
 const MENTION_STOP_WORDS = new Set([
   "je",
@@ -43,6 +45,13 @@ const MENTION_STOP_WORDS = new Set([
   "avoir",
   "trouver",
   "trouve",
+  "cherche",
+  "chercher",
+  "recherche",
+  "quelle",
+  "quel",
+  "quels",
+  "quelles",
   "envoyer",
   "envoie",
   "application",
@@ -166,6 +175,12 @@ function productText(product: ProductKnowledgeRow): { title: string; slug: strin
   return { title, slug, slugSpaced: slug.replace(/-/g, " ") };
 }
 
+function productMentionTokenMatches(token: string, title: string, slug: string): boolean {
+  if (slug.includes(token)) return true;
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(title);
+}
+
 /** How strongly a catalogue row matches an explicit product citation in the query. */
 export function computeExplicitProductMatchScore(product: ProductKnowledgeRow, texts: string[]): number {
   const { title, slug, slugSpaced } = productText(product);
@@ -192,13 +207,18 @@ export function computeExplicitProductMatchScore(product: ProductKnowledgeRow, t
       if (tokens.length > 0) {
         let matched = 0;
         for (const token of tokens) {
-          if (title.includes(token) || slug.includes(token)) matched += 1;
+          if (productMentionTokenMatches(token, title, slug)) matched += 1;
+        }
+        const joined = tokens.join(" ");
+        if (joined.length >= 8 && (title.includes(joined) || slugSpaced.includes(joined))) {
+          best = Math.max(best, 62);
         }
         const ratio = matched / tokens.length;
         if (ratio >= 0.85 && matched >= 2) best = Math.max(best, 55);
         else if (ratio >= 0.66 && matched >= 2) best = Math.max(best, 48);
-        else if (matched >= 1 && tokens.length === 1) best = Math.max(best, 45);
-        else if (matched >= 1) best = Math.max(best, 30 + matched * 8);
+        else if (matched >= 1 && tokens.length === 1 && tokens[0]!.length >= 7) {
+          best = Math.max(best, 45);
+        } else if (matched >= 1) best = Math.max(best, 30 + matched * 8);
         if (tokens.length >= 2 && matched < tokens.length && slug.split("-").length <= 2) {
           best = Math.min(best, 36);
         }
@@ -223,6 +243,11 @@ export function computeExplicitProductMatchScore(product: ProductKnowledgeRow, t
 
 export function productHasStrongExplicitMatch(product: ProductKnowledgeRow, texts: string[]): boolean {
   return computeExplicitProductMatchScore(product, texts) >= EXPLICIT_PRODUCT_MATCH_MIN;
+}
+
+/** True when the user question clearly targets this catalogue name (used for top-result priority). */
+export function productHasNamePriority(product: ProductKnowledgeRow, texts: string[]): boolean {
+  return computeExplicitProductMatchScore(product, texts) >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN;
 }
 
 /** Best catalogue match when the user explicitly asks for a technical sheet / FDS. */
