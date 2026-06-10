@@ -28,9 +28,9 @@ export function normalizeKey(value: string): string {
 export function isInformationalProductQuestion(query: string): boolean {
   const q = normalizeText(query);
   return (
-    /\b(existe|existe t il|disponible|couleur|couleurs|teint|teinter|teintable|peut on|peut on le|est ce que|est ce qu|est ce|combien|quelle taille|quelle couleur|plusieurs|variante|version|gamme|reference|jaunir|jaunissement|premium|qualite|resiste|resistant|fongicide|durable|odeur|incolore|transparent)\b/.test(
+    /\b(existe|existe t il|disponible|couleur|couleurs|teint|teinter|teintable|peut on|peut on le|est ce que|est ce qu|combien|quelle taille|quelle couleur|plusieurs|variante|version|gamme|reference)\b/.test(
       q,
-    ) || (/\?\s*$/.test(query.trim()) && /\b(le|la|les|ce|cette|produit|email|silicone|mastic|il|un)\b/.test(q))
+    ) || (/\?\s*$/.test(query.trim()) && /\b(le|la|les|ce|cette|produit|email|silicone|mastic)\b/.test(q))
   );
 }
 

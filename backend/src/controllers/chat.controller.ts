@@ -29,8 +29,7 @@ import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { fireAndForget, withTimeout } from "../utils/async.js";
 import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection } from "../utils/amazon.js";
 import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, normalizeAudience, normalizeLocale } from "../utils/locale.js";
-import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectTechnicalSheetReply, buildEscalationSection, buildHandoff, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
-import { getLastRecommendedProductFromHistory, isProductFollowUpQuestion } from "../utils/conversation-context.js";
+import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectTechnicalSheetReply, buildEscalationSection, buildHandoff, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
 import { formatNamedProductCitationPrompt, hasNamedProductCitation, isExplicitProductLookupQuery, resolveDirectTechnicalSheetProduct } from "../utils/product-mention.js";
 import { containsCompetitorBrandMention, sanitizeCompetitorBrandMentions } from "../utils/brand-policy.js";
 import { buildNoContextFallback, extractFluid, getGenericNoAnswerFallback, hasOngoingConversation, isInformationalProductQuestion, resolveClarificationContext, toAudienceLabel, toHistoryPrompt } from "../utils/text.js";
@@ -534,8 +533,6 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
 
       const history = toHistoryPrompt(historyMessages);
       const ongoingConversation = hasOngoingConversation(historyMessages);
-      const priorRecommendedProduct = getLastRecommendedProductFromHistory(historyMessages);
-      const productFollowUp = isProductFollowUpQuestion(message, historyMessages);
       const baseFilters = [{ key: "locale", value: locale, operator: "==" as const }];
       const themeFilters = effectiveTheme
         ? [{ key: "theme", value: effectiveTheme, operator: "==" as const }]
@@ -906,7 +903,6 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         { geoCountry: effectiveGeoCountry, geoConsent: effectiveGeoConsent },
         negativeExamples,
         ongoingConversation,
-        productFollowUp && priorRecommendedProduct ? { priorProduct: priorRecommendedProduct } : null,
       )}${catalogAnchorReminder}
 
 METADATA_PROFIL: ${toAudienceLabel(audience)}
@@ -918,8 +914,7 @@ FICHES_TECHNIQUES_PDF (use ONLY in "Documentation Officielle" section, NEVER as 
 ${sourceUrls.length > 0 ? sourceUrls.map((url) => `- ${url}`).join("\n") : "- aucune"}
 
 QUESTION UTILISATEUR: ${queryForRetrieval}
-${productFollowUp && priorRecommendedProduct ? `\nTYPE_QUESTION: product_follow_up — MODE 1 OBLIGATOIRE. Produit déjà conseillé : ${priorRecommendedProduct}. Réponds UNIQUEMENT à la nouvelle question en prose courte ; ne répète PAS la fiche produit ni les liens FT/FDS.` : ""}
-${!productFollowUp && isInformationalProductQuestion(queryForRetrieval) ? "\nTYPE_QUESTION: informational_faq — MODE 1: réponds DIRECTEMENT à la question (couleurs, teinte, disponibilité, oui/non…) en prose naturelle avec les faits de la fiche, AVANT toute recommandation produit. MODE 2 seulement si un produit catalogue précis s'impose." : ""}
+${isInformationalProductQuestion(queryForRetrieval) ? "\nTYPE_QUESTION: informational_faq — MODE 1: réponds DIRECTEMENT à la question (couleurs, teinte, disponibilité, oui/non…) en prose naturelle avec les faits de la fiche, AVANT toute recommandation produit. MODE 2 seulement si un produit catalogue précis s'impose." : ""}
 ${formatNamedProductCitationPrompt(message)}
 
 RAPPEL_DIAGNOSTIC: Les extraits peuvent melanger fiches techniques (TDS / limites d'application: pression, fluides, temperatures) et fiches de securite (SDS ou FDS / compatibilite chimique, dangers). Croiser les deux familles de documents uniquement lorsque leurs contenus sont presents dans les extraits ci-dessous.
@@ -1007,9 +1002,6 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
       }
 
       answer = stripLeadingConversationGreeting(answer, ongoingConversation);
-      if (productFollowUp && priorRecommendedProduct) {
-        answer = compactProductFollowUpAnswer(answer, priorRecommendedProduct);
-      }
       answer = sanitizeDocumentationLinks(answer);
       if (containsCompetitorBrandMention(answer)) {
         console.warn("[/api/chat] competitor_brand_redacted", { sessionId });
@@ -1025,16 +1017,15 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
       answer = removeComplementaryQuestionBlocks(answer);
 
       const extractedProduct = extractRecommendedProduct(answer);
-      const validProductRecommended = productFollowUp ? false : hasValidRecommendedProduct(answer);
+      const validProductRecommended = hasValidRecommendedProduct(answer);
       let analyticsProduct: string | null = null;
       let analyticsAmazonUrl = "";
 
       if (!validProductRecommended) {
         const stripped = stripAnswerWithoutProductRecommendation(removeAmazonSections(answer));
-        const moreDetails =
-          productFollowUp || answerProvidesProductGuidance(answer)
-            ? ""
-            : buildMoreDetailsForProductRequest(locale, audience, message);
+        const moreDetails = answerProvidesProductGuidance(answer)
+          ? ""
+          : buildMoreDetailsForProductRequest(locale, audience, message);
         answer = [stripped, moreDetails].filter(Boolean).join("\n\n");
         sseWrite(res, { replaceContent: answer, sessionId, audience }, "chunk");
         console.log("[/api/chat] no_product_recommendation", {
@@ -1077,10 +1068,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
 
       const extractedComplementary = extractComplementaryQuestionBlock(answer);
       answer = extractedComplementary.cleaned;
-      const upsell =
-        productFollowUp
-          ? null
-          : extractedComplementary.question ?? buildComplementarySuggestion(locale, audience, message);
+      const upsell = extractedComplementary.question ?? buildComplementarySuggestion(locale, audience, message);
       if (upsell && !isComplementaryQuestion(answer)) {
         const withUpsell = `\n\n${upsell.trim()}`;
         answer += withUpsell;
