@@ -193,6 +193,7 @@ Use when ANY of these apply:
 - You are greeting, onboarding, or asking for missing details listed in EXTRACTED_METADATA (usually fluid type; avoid asking diameter/pressure unless listed).
 - EXTRACTED_METADATA lists missing_params you still need.
 - The user asks a general or informational question and you do NOT yet have enough context for ONE specific catalogue product.
+- The user thanks you or closes the exchange (« merci », « ok parfait », « c'est bon ») — reply briefly and warmly; **never** recommend a new product.
 - No retrieved product truly fits — do NOT force a product block.
 
 How to write in MODE 1:

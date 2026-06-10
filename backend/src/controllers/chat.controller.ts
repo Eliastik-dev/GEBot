@@ -29,11 +29,11 @@ import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { fireAndForget, withTimeout } from "../utils/async.js";
 import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection } from "../utils/amazon.js";
 import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, normalizeAudience, normalizeLocale } from "../utils/locale.js";
-import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectTechnicalSheetReply, buildEscalationSection, buildHandoff, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
+import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectTechnicalSheetReply, buildEscalationSection, buildGratitudeReply, buildHandoff, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
 import { getLastRecommendedProductFromHistory, isProductFollowUpQuestion } from "../utils/conversation-context.js";
 import { formatNamedProductCitationPrompt, hasNamedProductCitation, isExplicitProductLookupQuery, resolveDirectTechnicalSheetProduct } from "../utils/product-mention.js";
 import { containsCompetitorBrandMention, sanitizeCompetitorBrandMentions } from "../utils/brand-policy.js";
-import { buildNoContextFallback, extractFluid, getGenericNoAnswerFallback, hasOngoingConversation, isInformationalProductQuestion, resolveClarificationContext, toAudienceLabel, toHistoryPrompt } from "../utils/text.js";
+import { buildNoContextFallback, extractFluid, getGenericNoAnswerFallback, hasOngoingConversation, isGratitudeOrClosingMessage, isInformationalProductQuestion, resolveClarificationContext, toAudienceLabel, toHistoryPrompt } from "../utils/text.js";
 import { resolveJointPasteClarificationContext } from "../utils/joint-paste.js";
 import { getIncomingSessionId } from "../utils/session.js";
 import { startSse, sseWrite } from "../utils/sse.js";
@@ -154,6 +154,32 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
             status: yesNo === "yes" ? "complementary_yes" : "complementary_no",
           }),
           "logQuery.complementary",
+        );
+        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        res.end();
+        return;
+      }
+
+      if (
+        hasOngoingConversation(historyMessages) &&
+        previousAssistant &&
+        isGratitudeOrClosingMessage(message)
+      ) {
+        const response = buildGratitudeReply(locale, audience);
+        startSse(res);
+        sseWrite(res, { delta: response, sessionId, audience }, "chunk");
+        await saveMessage(sessionId, "assistant", response);
+        fireAndForget(
+          logQuery({
+            sessionId,
+            locale,
+            audience,
+            fluidType: fluidHint,
+            query: message,
+            responseMs: Date.now() - startedAt,
+            status: "gratitude_closing",
+          }),
+          "logQuery.gratitude_closing",
         );
         sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
