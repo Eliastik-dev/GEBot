@@ -5,7 +5,6 @@ import { GEO_TIMEOUT_MS, RESELLER_CACHE_TTL_MS, RESELLER_DIRECTORY_URL } from ".
 import type { Locale, ProductTheme, Reseller, StoredMessage } from "../types/index.js";
 import { hasDescalingContext, hasHeatingCircuitContext, hasInaccessibleThreadedJointForResinContext, isJointSealingAssemblyWithoutLeak, isPersonalDrinkwareOutOfCatalog, isPurePipeLeakDamageTurn, isThinRetrievalQuery, userTurnRelevantToLeakRepairThread, hasObviousLeakOrPipeDamageIntent, isThreadedJointOrLiquidSealingTopic } from "../utils/diagnostic-rules.js";
 import { isProfileOnlyMessage, isThemeOnlyMessage } from "../utils/locale.js";
-import { isGratitudeOrClosingMessage } from "../utils/text.js";
 import { normalizeText } from "../utils/text.js";
 import { withTimeout } from "../utils/async.js";
 
@@ -175,9 +174,6 @@ export function buildThemeAwareSearchQuery(baseQuestion: string, theme: ProductT
 /** Short or dimension-only follow-ups (e.g. "100mm") must not be the sole vector query — merge recent user turns. */
 
 export function enrichRetrievalQuery(effectiveQuery: string, historyMessages: StoredMessage[], currentMessage: string): string {
-  if (isGratitudeOrClosingMessage(currentMessage) || isGratitudeOrClosingMessage(effectiveQuery)) {
-    return currentMessage.trim();
-  }
   if (!isThinRetrievalQuery(effectiveQuery)) return effectiveQuery;
   const userTurns = historyMessages
     .filter((m) => m.role === "user" && !isProfileOnlyMessage(m.content) && !isThemeOnlyMessage(m.content) && m.content.trim().length > 6)

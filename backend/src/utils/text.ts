@@ -134,31 +134,3 @@ export function toHistoryPrompt(messages: StoredMessage[]): string {
 export function hasOngoingConversation(messages: StoredMessage[]): boolean {
   return messages.some((row) => row.role === "assistant" && row.content.trim().length > 0);
 }
-
-/** Short thanks / closing — no new technical question (e.g. « merci », « ok parfait »). */
-export function isGratitudeOrClosingMessage(message: string): boolean {
-  const raw = message.trim();
-  if (!raw || raw.length > 80) return false;
-
-  const q = normalizeText(raw);
-
-  if (/\b(quel|quelle|comment|pourquoi|est ce|fiche|fds|produit|silicone|fuite|recommand|donnez|envoy|besoin|cherche)\b/.test(q)) {
-    const thanksOnly =
-      /^(merci|thanks|thank you|bedankt|dziekuje)(\s+(beaucoup|bien|infiniment|pour (l info|votre aide|ton aide)))?\s*[!.]*$/.test(
-        q,
-      ) ||
-      /^(ok|parfait|super|genial|nickel|top)(\s+merci)?\s*[!.]*$/.test(q);
-    if (!thanksOnly) return false;
-  }
-
-  return (
-    /^(merci|thanks|thank you|thank|bedankt|dank je|dziekuje|dzieki)(\s+(beaucoup|bien|infiniment|pour (l info|votre aide|ton aide)))?\s*[!.]*$/.test(
-      q,
-    ) ||
-    /^(ok|okay)(\s+(parfait|merci|thanks))?\s*[!.]*$/.test(q) ||
-    /^(parfait|super|genial|nickel|top|tres bien)(\s+(merci|thanks))?\s*[!.]*$/.test(q) ||
-    /^c est (bon|parfait)\s*[!.]*$/.test(q) ||
-    /^(je vous remercie|un grand merci)\s*[!.]*$/.test(q) ||
-    /^(a plus|a bientot|bonne journee|bonne soiree)\s*[!.]*$/.test(q)
-  );
-}

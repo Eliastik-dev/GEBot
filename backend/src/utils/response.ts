@@ -68,22 +68,6 @@ export function isComplementaryQuestion(text: string): boolean {
 }
 
 
-export function buildGratitudeReply(locale: Locale, audience: Audience | null): string {
-  if (locale === "en") {
-    return "You're welcome! Feel free to come back if you have any other questions.";
-  }
-  if (locale === "nl") {
-    return "Graag gedaan! Aarzel niet om terug te komen als u nog vragen heeft.";
-  }
-  if (locale === "pl") {
-    return "Nie ma za co! Wroc, jesli bedziesz miec kolejne pytania.";
-  }
-  if (audience === "professional") {
-    return "Avec plaisir ! N'hésitez pas si vous avez d'autres questions sur votre chantier.";
-  }
-  return "Avec plaisir ! N'hésitez pas si vous avez d'autres questions sur votre installation.";
-}
-
 export function buildComplementaryFollowUp(locale: Locale, answer: "yes" | "no", sourceMessage: string): string {
   if (answer === "no") {
     if (locale === "en") return "Understood. We stay on the current solution.";
