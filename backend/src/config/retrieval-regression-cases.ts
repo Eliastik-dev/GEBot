@@ -133,6 +133,16 @@ export const RETRIEVAL_REGRESSION_CASES: RetrievalRegressionCase[] = [
     intent: "leak_repair",
   },
   {
+    id: "plomberie-odeur-canalisation-nl",
+    locale: "nl",
+    theme: "plomberie",
+    audience: "particulier",
+    query: "mijn afvoeren ruiken slecht welk product kan ik gebruiken",
+    expectedSlugs: ["ontstopper-geurverwijderaar", "ontstopper-universeel", "universele-ontstopper"],
+    forbiddenSlugs: ["pool-bande-abrasive", "pistolet-stop-goutte"],
+    intent: "general_technical",
+  },
+  {
     id: "chauffage-descaling-plate-exchanger",
     locale: "fr",
     theme: "chauffage",
@@ -288,6 +298,14 @@ export const CITATION_REGRESSION_CASES: Array<{
     query: "le g110 inhibiteur universel c est bien pour un plancher chauffant ?",
     expectedSlugs: ["g110-inhibiteur-universel"],
     forbiddenSlugs: ["inhibiteur-g1", "g10-inhibitor"],
+    audience: "particulier",
+  },
+  {
+    id: "plomberie-citation-deboucheur-universel-nl",
+    locale: "nl",
+    query: "bestaat er een deboucheur universel?",
+    expectedSlugs: ["ontstopper-universeel", "universele-ontstopper"],
+    forbiddenSlugs: ["g110-inhibiteur-universel"],
     audience: "particulier",
   },
 ];

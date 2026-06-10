@@ -6,3 +6,5 @@ frontend/.env
 .env
 nginx.conf.generated
 supabase/
+.idea/
+backend/output/

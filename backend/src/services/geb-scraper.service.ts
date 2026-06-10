@@ -3,7 +3,9 @@ import * as cheerio from "cheerio";
 import { parseWpCatalogFromProduct } from "./wp-catalog-theme.service.js";
 import type { ScrapedProductRow } from "./product-theme.service.js";
 
-const LOCALES = ["fr", "nl", "pl"] as const;
+export const SCRAPE_LOCALES = ["fr", "nl", "pl"] as const;
+export type ScrapeLocale = (typeof SCRAPE_LOCALES)[number];
+const LOCALES = SCRAPE_LOCALES;
 const WP_PRODUCT_API_BY_LOCALE: Record<(typeof LOCALES)[number], string> = {
   fr: "https://www.geb.fr/wp-json/wp/v2/product",
   nl: "https://www.geb.fr/nl/wp-json/wp/v2/product",
@@ -12,6 +14,9 @@ const WP_PRODUCT_API_BY_LOCALE: Record<(typeof LOCALES)[number], string> = {
 const PER_PAGE = 100;
 const PRODUCT_REQUEST_DELAY_MS = 500;
 const HTTP_TIMEOUT_MS = 15000;
+const WP_API_TIMEOUT_MS = Number(process.env.SCRAPE_WP_TIMEOUT_MS ?? "45000");
+const WP_API_PAGE_DELAY_MS = Number(process.env.SCRAPE_WP_PAGE_DELAY_MS ?? "1000");
+const WP_API_MAX_RETRIES = Number(process.env.SCRAPE_WP_MAX_RETRIES ?? "3");
 
 type ScrapeLogger = Pick<Console, "info" | "warn" | "error">;
 
@@ -129,16 +134,36 @@ function findPdfLinkByLabel(
   return found;
 }
 
-function findAnyFrenchPdfCandidates($: cheerio.CheerioAPI, pageUrl: string): string[] {
+function classifyPdfUrl(url: string): "ft" | "fds" | "unknown" {
+  const path = url.split("?")[0]!.toUpperCase();
+  if (/\/T_(FR|NL|PL)_/.test(path) || /\/PDF\/TECH\/T_/.test(path)) return "ft";
+  if (/\/S_(FR|NL|PL)_/.test(path) || /\/PDF\/TECH\/S_/.test(path)) return "fds";
+  if (/FDS|MSDS|SDS|SAFETY/.test(path)) return "fds";
+  if (/FICHE.?TECH|TECHNICAL|TDS|_FT_/.test(path)) return "ft";
+  return "unknown";
+}
+
+function collectPdfUrlsOnPage($: cheerio.CheerioAPI, pageUrl: string): string[] {
   const out: string[] = [];
   $("a").each((_, el) => {
     const href = $(el).attr("href");
     if (!href) return;
     const absolute = makeAbsoluteUrl(href, pageUrl);
     if (!absolute || !/\.pdf(\?|#|$)/i.test(absolute)) return;
-    if (/_FR_/i.test(absolute)) out.push(absolute);
+    out.push(absolute);
   });
   return out;
+}
+
+function pickFtFdsFromUrls(urls: string[]): { ft: string | null; fds: string | null } {
+  let ft: string | null = null;
+  let fds: string | null = null;
+  for (const url of urls) {
+    const kind = classifyPdfUrl(url);
+    if (kind === "ft" && !ft) ft = url;
+    if (kind === "fds" && !fds) fds = url;
+  }
+  return { ft, fds };
 }
 
 async function resolveLocalizedPdfUrl(
@@ -165,25 +190,127 @@ function normalizeTitleForPdfUrl(title: string): string {
     .replace(/^_|_$/g, "");
 }
 
+const PDF_SUFFIX_VARIANTS = ["_BRILLANT", "_MAT", "_PRO", "_PLUS", "_SPRAY", "_2", "_KIT"] as const;
+
+/** GEB PDFs often use JOINT_ET_FIX while WP titles read "JOINT & FIX". */
+function expandPdfNameBases(bases: string[]): string[] {
+  const out = new Set(bases.filter(Boolean));
+  for (const base of bases) {
+    if (/^JOINT_FIX_/i.test(base)) out.add(base.replace(/^JOINT_FIX_/i, "JOINT_ET_FIX_"));
+    if (/^JOINT_[A-Z]/i.test(base) && !/_ET_FIX_/i.test(base)) {
+      out.add(base.replace(/^JOINT_/i, "JOINT_ET_FIX_"));
+    }
+  }
+  return [...out];
+}
+
+function suffixHintsFromSlug(slug: string): string[] {
+  const hints: string[] = [];
+  if (/brillant/i.test(slug)) hints.push("_BRILLANT");
+  if (/(?:^|-)mat(?:-|$)/i.test(slug)) hints.push("_MAT");
+  if (/\bpro\b/i.test(slug)) hints.push("_PRO");
+  if (/spray/i.test(slug)) hints.push("_SPRAY");
+  if (/kit/i.test(slug)) hints.push("_KIT");
+  return hints;
+}
+
+function buildPdfCandidates(
+  base: string,
+  locale: string,
+  kind: "T" | "S",
+  slug: string,
+): string[] {
+  const token = getLanguageToken(locale);
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  const add = (suffix: string) => {
+    const url = `https://www.geb.fr/pdf/tech/${kind}_${token}_${base}${suffix}.pdf`;
+    if (!seen.has(url)) {
+      seen.add(url);
+      ordered.push(url);
+    }
+  };
+
+  for (const suffix of suffixHintsFromSlug(slug)) add(suffix);
+  add("");
+  for (const suffix of PDF_SUFFIX_VARIANTS) add(suffix);
+  return ordered;
+}
+
 async function guessPdfUrlByTitle(
   title: string,
   locale: string,
+  slug: string,
   logger: ScrapeLogger = console,
 ): Promise<{ ft_url: string | null; fds_url: string | null }> {
-  const token = getLanguageToken(locale);
   const normalized = normalizeTitleForPdfUrl(title);
   if (!normalized) return { ft_url: null, fds_url: null };
 
-  const ftCandidate = `https://www.geb.fr/pdf/tech/T_${token}_${normalized}.pdf`;
-  const fdsCandidate = `https://www.geb.fr/pdf/tech/S_${token}_${normalized}.pdf`;
-  const [ftExists, fdsExists] = await Promise.all([
-    urlExistsByHead(ftCandidate, logger),
-    urlExistsByHead(fdsCandidate, logger),
-  ]);
-  return {
-    ft_url: ftExists ? ftCandidate : null,
-    fds_url: fdsExists ? fdsCandidate : null,
-  };
+  const slugNorm = normalizeTitleForPdfUrl(slug.replace(/-/g, " "));
+  const bases = expandPdfNameBases([normalized, ...(slugNorm && slugNorm !== normalized ? [slugNorm] : [])]);
+
+  let ft_url: string | null = null;
+  let fds_url: string | null = null;
+
+  for (const base of bases) {
+    if (ft_url) break;
+    for (const candidate of buildPdfCandidates(base, locale, "T", slug)) {
+      if (await urlExistsByHead(candidate, logger)) {
+        ft_url = candidate;
+        logger.info?.("[scraper] PDF URL guessed from title pattern", { title, slug, ft_url });
+        break;
+      }
+    }
+  }
+
+  for (const base of bases) {
+    if (fds_url) break;
+    for (const candidate of buildPdfCandidates(base, locale, "S", slug)) {
+      if (await urlExistsByHead(candidate, logger)) {
+        fds_url = candidate;
+        break;
+      }
+    }
+  }
+
+  return { ft_url, fds_url };
+}
+
+function getProductTitle(product: Record<string, unknown>): string {
+  if (product.title && typeof product.title === "object") {
+    return String((product.title as { rendered?: string }).rendered ?? "");
+  }
+  return typeof product.title === "string" ? product.title : "";
+}
+
+async function resolveValidFtUrl(
+  current: string | null,
+  title: string,
+  locale: string,
+  slug: string,
+  logger: ScrapeLogger,
+): Promise<string | null> {
+  const encoded = current ? safeEncodeUrl(current) : null;
+  if (encoded && classifyPdfUrl(encoded) === "ft" && (await urlExistsByHead(encoded, logger))) {
+    return encoded;
+  }
+  const guessed = await guessPdfUrlByTitle(title, locale, slug, logger);
+  return guessed.ft_url;
+}
+
+async function resolveValidFdsUrl(
+  current: string | null,
+  title: string,
+  locale: string,
+  slug: string,
+  logger: ScrapeLogger,
+): Promise<string | null> {
+  const encoded = current ? safeEncodeUrl(current) : null;
+  if (encoded && classifyPdfUrl(encoded) === "fds" && (await urlExistsByHead(encoded, logger))) {
+    return encoded;
+  }
+  const guessed = await guessPdfUrlByTitle(title, locale, slug, logger);
+  return guessed.fds_url ?? (encoded && classifyPdfUrl(encoded) === "fds" ? encoded : null);
 }
 
 async function scrapeProductPage(
@@ -205,10 +332,11 @@ async function scrapeProductPage(
 
     let ftRaw = findPdfLinkByLabel($, productLink, ftMatcher);
     let fdsRaw = findPdfLinkByLabel($, productLink, fdsMatcher);
-    const guessedFrenchCandidates = findAnyFrenchPdfCandidates($, productLink);
-
-    if (!ftRaw && guessedFrenchCandidates.length > 0) ftRaw = guessedFrenchCandidates[0] ?? null;
-    if (!fdsRaw && guessedFrenchCandidates.length > 1) fdsRaw = guessedFrenchCandidates[1] ?? null;
+    const fromUrls = pickFtFdsFromUrls(collectPdfUrlsOnPage($, productLink));
+    if (!ftRaw && fromUrls.ft) ftRaw = fromUrls.ft;
+    if (!fdsRaw && fromUrls.fds) fdsRaw = fromUrls.fds;
+    if (ftRaw && classifyPdfUrl(ftRaw) === "fds") ftRaw = fromUrls.ft;
+    if (fdsRaw && classifyPdfUrl(fdsRaw) === "ft") fdsRaw = fromUrls.fds;
 
     let ft_url = safeEncodeUrl(ftRaw);
     let fds_url = safeEncodeUrl(fdsRaw);
@@ -224,20 +352,10 @@ async function scrapeProductPage(
       }
     }
 
-    if (!ft_url && !fds_url) {
-      const title =
-        product.title && typeof product.title === "object"
-          ? String((product.title as { rendered?: string }).rendered ?? "")
-          : typeof product.title === "string"
-            ? product.title
-            : "";
-      const guessed = await guessPdfUrlByTitle(title, locale, logger);
-      if (guessed.ft_url) {
-        logger.info?.("[scraper] PDF URL guessed from title pattern", { title, ft_url: guessed.ft_url });
-        ft_url = guessed.ft_url;
-      }
-      if (guessed.fds_url) fds_url = guessed.fds_url;
-    }
+    const title = getProductTitle(product);
+    const productSlug = typeof product.slug === "string" ? product.slug : "";
+    ft_url = await resolveValidFtUrl(ft_url, title, locale, productSlug, logger);
+    fds_url = await resolveValidFdsUrl(fds_url, title, locale, productSlug, logger);
 
     return { ft_url, fds_url };
   } catch (error) {
@@ -250,6 +368,43 @@ async function scrapeProductPage(
   }
 }
 
+async function fetchWpProductsPage(
+  endpoint: string,
+  page: number,
+  logger: ScrapeLogger,
+): Promise<{ items: Record<string, unknown>[]; totalPages: number | null; totalItems: number | null }> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= WP_API_MAX_RETRIES; attempt += 1) {
+    try {
+      const response = await axios.get(endpoint, {
+        params: { per_page: PER_PAGE, page, _embed: "wp:term" },
+        headers: { Accept: "application/json", ...getAuthHeader() },
+        timeout: WP_API_TIMEOUT_MS,
+      });
+      const items = Array.isArray(response.data) ? (response.data as Record<string, unknown>[]) : [];
+      const totalPagesRaw = response.headers["x-wp-totalpages"];
+      const totalItemsRaw = response.headers["x-wp-total"];
+      const totalPages = totalPagesRaw ? Number(totalPagesRaw) : null;
+      const totalItems = totalItemsRaw ? Number(totalItemsRaw) : null;
+      return {
+        items,
+        totalPages: Number.isFinite(totalPages) && totalPages! > 0 ? totalPages : null,
+        totalItems: Number.isFinite(totalItems) && totalItems! > 0 ? totalItems : null,
+      };
+    } catch (error) {
+      lastError = error;
+      logger.warn?.("[scraper] WP products page fetch retry", {
+        page,
+        attempt,
+        maxRetries: WP_API_MAX_RETRIES,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      if (attempt < WP_API_MAX_RETRIES) await sleep(WP_API_PAGE_DELAY_MS * attempt);
+    }
+  }
+  throw lastError;
+}
+
 async function fetchAllWpProductsForLocale(
   locale: (typeof LOCALES)[number],
   logger: ScrapeLogger = console,
@@ -258,56 +413,58 @@ async function fetchAllWpProductsForLocale(
   const out: Record<string, unknown>[] = [];
   let page = 1;
   let totalPagesFromHeader: number | null = null;
+  let totalItemsFromHeader: number | null = null;
 
   while (true) {
     logger.info?.(`[scraper] Fetching [${locale.toUpperCase()}] page ${page}...`);
-    try {
-      const response = await axios.get(endpoint, {
-        params: { per_page: PER_PAGE, page, _embed: "wp:term" },
-        headers: { Accept: "application/json", ...getAuthHeader() },
-        timeout: HTTP_TIMEOUT_MS,
-      });
+    const { items, totalPages, totalItems } = await fetchWpProductsPage(endpoint, page, logger);
+    if (totalPages != null) totalPagesFromHeader = totalPages;
+    if (totalItems != null) totalItemsFromHeader = totalItems;
 
-      const items = Array.isArray(response.data) ? (response.data as Record<string, unknown>[]) : [];
-      if (items.length === 0) break;
-      out.push(...items);
+    if (items.length === 0) break;
+    out.push(...items);
 
-      const header = response.headers["x-wp-totalpages"];
-      if (header && totalPagesFromHeader == null) {
-        const parsed = Number(header);
-        if (Number.isFinite(parsed) && parsed > 0) totalPagesFromHeader = parsed;
-      }
-      if (totalPagesFromHeader && page >= totalPagesFromHeader) break;
-      if (items.length < PER_PAGE) break;
-      page += 1;
-    } catch (error) {
-      logger.error?.("[scraper] Failed to fetch WP products page", {
-        locale,
-        page,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      break;
-    }
+    if (totalPagesFromHeader && page >= totalPagesFromHeader) break;
+    if (items.length < PER_PAGE) break;
+    page += 1;
+    await sleep(WP_API_PAGE_DELAY_MS);
   }
 
-  logger.info?.(`[scraper] [${locale.toUpperCase()}] fetched ${out.length} products.`);
+  if (totalItemsFromHeader != null && out.length < totalItemsFromHeader) {
+    logger.error?.("[scraper] Incomplete WP product fetch", {
+      locale,
+      fetched: out.length,
+      expected: totalItemsFromHeader,
+      pagesFetched: page,
+      totalPages: totalPagesFromHeader,
+    });
+  }
+
+  logger.info?.(`[scraper] [${locale.toUpperCase()}] fetched ${out.length} products.`, {
+    expected: totalItemsFromHeader,
+    pages: page,
+  });
   return out;
 }
 
-function getProductTitle(product: Record<string, unknown>): string {
-  if (product.title && typeof product.title === "object") {
-    return String((product.title as { rendered?: string }).rendered ?? "");
-  }
-  return typeof product.title === "string" ? product.title : "";
-}
-
 /** Scrape GEB products: PDF URLs + official WP product_cat gamme. */
-export async function scrapeGebProductPdfs(logger: ScrapeLogger = console): Promise<ScrapedProductRow[]> {
+export async function scrapeGebProductPdfs(
+  logger: ScrapeLogger = console,
+  locales: readonly ScrapeLocale[] = LOCALES,
+  slugFilter: string | null = null,
+): Promise<ScrapedProductRow[]> {
   const results: ScrapedProductRow[] = [];
   const frBySlug = new Map<string, { ft_url: string | null; fds_url: string | null; catalog: ReturnType<typeof parseWpCatalogFromProduct> }>();
 
-  for (const locale of LOCALES) {
-    const products = await fetchAllWpProductsForLocale(locale, logger);
+  for (const locale of locales) {
+    let products = await fetchAllWpProductsForLocale(locale, logger);
+    if (slugFilter) {
+      products = products.filter((product) => product.slug === slugFilter);
+      if (products.length === 0) {
+        logger.warn?.(`[scraper] No product for slug=${slugFilter} [${locale}]`);
+        continue;
+      }
+    }
 
     for (let i = 0; i < products.length; i += 1) {
       const product = products[i]!;

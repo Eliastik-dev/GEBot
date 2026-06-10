@@ -29,7 +29,18 @@ type WpMedia = {
 const WP_MEDIA_ENDPOINT = "https://www.geb.fr/wp-json/wp/v2/media?media_type=application";
 const SCRAPE_OUTPUT_PATH = path.resolve(process.cwd(), "output", "scrape-results.json");
 const PRIORITY_TERMS = ["SILICONE", "GEBSICONE", "FICHE"];
-const TECHNICAL_TERMS = ["TECHNIQUE", "TECHNICAL", "TDS", "FT_", "FICHE TECHNIQUE", "FICHE_PRODUIT"];
+const TECHNICAL_TERMS = [
+  "TECHNIQUE",
+  "TECHNICAL",
+  "TDS",
+  "FT_",
+  "T_FR_",
+  "T_NL_",
+  "T_PL_",
+  "S_FR_",
+  "FICHE TECHNIQUE",
+  "FICHE_PRODUIT",
+];
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();

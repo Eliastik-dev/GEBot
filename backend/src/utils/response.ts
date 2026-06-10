@@ -331,6 +331,74 @@ ${ftLine}
 ${fdsLine}`;
 }
 
+function catalogSummaryFallback(locale: Locale): string {
+  if (locale === "en") return "GEB catalogue product.";
+  if (locale === "nl") return "GEB-catalogusproduct.";
+  if (locale === "pl") return "Produkt z katalogu GEB.";
+  return "Produit du catalogue GEB.";
+}
+
+function documentationLines(locale: Locale, product: ProductKnowledgeRow): { ftLine: string; fdsLine: string } {
+  const ftLine = product.ft_url
+    ? `- [Fiche Technique](${product.ft_url})`
+    : locale === "en"
+      ? "- Technical sheet: Not specified in the catalogue record"
+      : "- Fiche technique : Non précisé dans la fiche";
+  const fdsLine = product.fds_url
+    ? `- [Fiche de Données de Sécurité (FDS)](${product.fds_url})`
+    : locale === "en"
+      ? "- SDS: Not specified in the catalogue record"
+      : "- FDS : Non précisé dans la fiche";
+  return { ftLine, fdsLine };
+}
+
+/** Deterministic MODE 2 when the user cites a catalogue product by name. */
+export function buildDirectCitedProductReply(locale: Locale, product: ProductKnowledgeRow): string {
+  const name = decodeHtmlEntities(product.canonical_name).trim();
+  const summary = product.summary_technical?.trim() || catalogSummaryFallback(locale);
+  const { ftLine, fdsLine } = documentationLines(locale, product);
+
+  if (locale === "en") {
+    return `Yes — **${name}** is in the GEB catalogue.
+
+### 📦 Recommended Product: **${name}**
+- **Description:** ${summary}
+
+### 📄 Official Documentation
+${ftLine}
+${fdsLine}`;
+  }
+  if (locale === "nl") {
+    return `Ja — **${name}** staat in de GEB-catalogus.
+
+### 📦 Aanbevolen product: **${name}**
+- **Beschrijving:** ${summary}
+
+### 📄 Officiële documentatie
+${ftLine}
+${fdsLine}`;
+  }
+  if (locale === "pl") {
+    return `Tak — **${name}** jest w katalogu GEB.
+
+### 📦 Rekomendowany produkt: **${name}**
+- **Opis:** ${summary}
+
+### 📄 Dokumentacja oficialna
+${ftLine}
+${fdsLine}`;
+  }
+
+  return `Oui — **${name}** fait partie du catalogue GEB.
+
+### 📦 Produit Recommandé : **${name}**
+- **Description :** ${summary}
+
+### 📄 Documentation Officielle
+${ftLine}
+${fdsLine}`;
+}
+
 /**
  * On product follow-ups, keep only conversational prose — drop repeated MODE 2 blocks.
  */

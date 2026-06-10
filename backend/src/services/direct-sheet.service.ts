@@ -37,11 +37,15 @@ export type DirectSheetTurnContext = {
   startedAt: number;
   resellerPromise: Promise<Reseller[]>;
   ongoingConversation: boolean;
+  buildReply?: (locale: Locale, product: ProductKnowledgeRow) => string;
+  logStatus?: "direct_technical_sheet" | "direct_cited_product";
 };
 
-/** Stream a catalogue-backed technical sheet reply (no LLM generation). */
+/** Stream a catalogue-backed product reply (no LLM generation). */
 export async function deliverDirectTechnicalSheetTurn(ctx: DirectSheetTurnContext): Promise<void> {
-  let answer = buildDirectTechnicalSheetReply(ctx.locale, ctx.product);
+  const buildReply = ctx.buildReply ?? buildDirectTechnicalSheetReply;
+  const logStatus = ctx.logStatus ?? "direct_technical_sheet";
+  let answer = buildReply(ctx.locale, ctx.product);
   sseWrite(ctx.res, { delta: answer, sessionId: ctx.sessionId, audience: ctx.audience }, "chunk");
 
   answer = stripLeadingConversationGreeting(answer, ctx.ongoingConversation);
@@ -80,7 +84,8 @@ export async function deliverDirectTechnicalSheetTurn(ctx: DirectSheetTurnContex
       query_for_retrieval: ctx.queryForRetrieval,
       retrieval_path: "product_knowledge",
       product_slugs: [ctx.product.slug],
-      direct_technical_sheet: true,
+      direct_technical_sheet: logStatus === "direct_technical_sheet",
+      direct_cited_product: logStatus === "direct_cited_product",
     },
   });
 
@@ -94,9 +99,9 @@ export async function deliverDirectTechnicalSheetTurn(ctx: DirectSheetTurnContex
       fluidType: ctx.extractedMeta.fluid ?? null,
       query: ctx.queryForRetrieval,
       responseMs: Date.now() - ctx.startedAt,
-      status: "direct_technical_sheet",
+      status: logStatus,
     }),
-    "logQuery.direct_technical_sheet",
+    `logQuery.${logStatus}`,
   );
   fireAndForget(
     logProductAnalytics({
@@ -107,9 +112,9 @@ export async function deliverDirectTechnicalSheetTurn(ctx: DirectSheetTurnContex
       recommendedProduct: recommendation.productName ?? extractRecommendedProduct(answer),
       amazonUrl: recommendation.amazonUrl,
       problemType: problemClassification.problemType,
-      status: "direct_technical_sheet",
+      status: logStatus,
     }),
-    "logProductAnalytics.direct_technical_sheet",
+    `logProductAnalytics.${logStatus}`,
   );
 
   sseWrite(

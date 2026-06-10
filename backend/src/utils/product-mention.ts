@@ -63,6 +63,10 @@ const MENTION_STOP_WORDS = new Set([
 
 const SHORT_MENTION_TOKENS = new Set(["abs", "pvc", "ppr", "pe", "pp", "dn", "ms", "rt1", "60"]);
 
+/** Catalogue family names users cite directly (deboucheur, G110, Gebsoplast…). */
+const CATALOG_PRODUCT_FAMILY_RE =
+  /\b(inhibiteur|desembou|desembouant|deboucheur|debouch|detartrant|detartrans|colmateur|colmatant|gebsoplast|collex|ms[\s-]?zinc|toiturol|silicone|chrono|gebetanche|filasse|ptfe|collafeu|propfeu|acrybat|geborizon|startex|ontstopper|udrazniacz|lekdichter)\b/;
+
 export function normalizeProductMentionText(value: string): string {
   return value
     .toLowerCase()
@@ -175,10 +179,26 @@ function productText(product: ProductKnowledgeRow): { title: string; slug: strin
   return { title, slug, slugSpaced: slug.replace(/-/g, " ") };
 }
 
+const MENTION_TOKEN_SYNONYMS: Record<string, string[]> = {
+  deboucheur: ["debouch", "ontstopper", "udrazniacz"],
+  debouch: ["deboucheur", "ontstopper", "udrazniacz"],
+  universel: ["universeel", "uniwersalny"],
+  professionnel: ["professioneel", "profesjonalny"],
+  odeur: ["geur", "odeurs"],
+};
+
+function mentionTokensForMatch(token: string): string[] {
+  const variants = new Set<string>([token, ...(MENTION_TOKEN_SYNONYMS[token] ?? [])]);
+  return [...variants];
+}
+
 function productMentionTokenMatches(token: string, title: string, slug: string): boolean {
-  if (slug.includes(token)) return true;
-  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(title);
+  for (const variant of mentionTokensForMatch(token)) {
+    if (slug.includes(variant)) return true;
+    const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(title)) return true;
+  }
+  return false;
 }
 
 /** How strongly a catalogue row matches an explicit product citation in the query. */
@@ -274,6 +294,7 @@ export function resolveDirectTechnicalSheetProduct(
 export function hasNamedProductCitation(text: string): boolean {
   if (extractCatalogProductCodes(text).length > 0) return true;
   const q = normalizeProductMentionText(text);
+  if (CATALOG_PRODUCT_FAMILY_RE.test(q)) return true;
   return (
     /\b(inhibiteur|desembou|gebsoplast|collex|ms[\s-]?zinc|toiturol|silicone|chrono)\b/.test(q) &&
     /\b(g\d+|univ|universel)\b/.test(q)
@@ -305,10 +326,31 @@ export function extractCitedProductSearchTerms(text: string): string[] {
 }
 
 export function formatNamedProductCitationPrompt(text: string): string {
+  if (!hasNamedProductCitation(text)) return "";
   const codes = extractCatalogProductCodes(text);
-  if (codes.length === 0) return "";
-  const list = codes.map((c) => c.toUpperCase()).join(", ");
-  return `\nCITATION_PRODUIT: L'utilisateur cite explicitement le(s) produit(s) catalogue ${list}. Les blocs correspondants sont en tête du contexte. Répondez sur ce(s) produit(s) avec les faits de la fiche (usage, compatibilité, limites). Interdit d'affirmer qu'ils sont absents du catalogue GEB si un bloc les décrit.`;
+  const codeHint =
+    codes.length > 0
+      ? ` le(s) produit(s) catalogue ${codes.map((c) => c.toUpperCase()).join(", ")}`
+      : " un produit GEB par son nom ou sa famille";
+  return `\nCITATION_PRODUIT: L'utilisateur cite explicitement${codeHint}. Les blocs correspondants sont en tête du contexte. Répondez en MODE 2 sur ce produit (usage, compatibilité, limites) — ignorez profil et domaine de session si le nom cité correspond à la fiche. Interdit d'affirmer qu'il est absent du catalogue GEB si un bloc le décrit.`;
+}
+
+/** Best catalogue match when the user cites a product by name (not a fiche technique request). */
+export function resolveDirectCitedProduct(
+  userQuery: string,
+  products: ProductKnowledgeRow[],
+): ProductKnowledgeRow | null {
+  if (!hasNamedProductCitation(userQuery) || isExplicitProductLookupQuery(userQuery) || products.length === 0) {
+    return null;
+  }
+
+  let best: { product: ProductKnowledgeRow; score: number } | null = null;
+  for (const product of products) {
+    const score = computeExplicitProductMatchScore(product, [userQuery]);
+    if (score < EXPLICIT_PRODUCT_NAME_PRIORITY_MIN) continue;
+    if (!best || score > best.score) best = { product, score };
+  }
+  return best?.product ?? null;
 }
 
 /** Avoid G10 matching G110 (and similar prefix collisions) in slug/name search. */

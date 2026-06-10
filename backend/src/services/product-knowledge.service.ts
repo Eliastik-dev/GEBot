@@ -26,6 +26,7 @@ import {
   matchesCatalogCodeTerm,
   EXPLICIT_PRODUCT_NAME_PRIORITY_MIN,
   productHasStrongExplicitMatch,
+  resolveDirectCitedProduct,
   resolveDirectTechnicalSheetProduct,
 } from "../utils/product-mention.js";
 
@@ -77,6 +78,11 @@ const EXPLICIT_CATALOG_PRODUCT_PATTERNS: Array<{ pattern: RegExp; slug: string }
   { pattern: /\btoiturol\b/i, slug: "toiturol" },
   { pattern: /\bacrybat\b/i, slug: "acrybat" },
   { pattern: /\bgebetanche\b/i, slug: "gebetanche-eau-potable-rt1-geb" },
+  { pattern: /\b(?:deboucheur|debouch|ontstopper)\s+universel\b/i, slug: "ontstopper-universeel" },
+  { pattern: /\buniversele\s+ontstopper\b/i, slug: "universele-ontstopper" },
+  { pattern: /\b(?:deboucheur|debouch|ontstopper)\s+professionnel\b/i, slug: "ontstopper-professioneel" },
+  { pattern: /\budrazniacz\s+uniwersalny\b/i, slug: "udrazniacz-uniwersalny" },
+  { pattern: /\b(?:destructeur|destruction)\s+d['']?\s*odeurs?\b/i, slug: "ontstopper-geurverwijderaar" },
 ];
 
 function normalizeText(value: string): string {
@@ -169,7 +175,19 @@ function scoreProduct(
   }
 
   if (tags.includes("debouchage")) {
-    if (title.includes("debouch")) score += 8;
+    if (title.includes("debouch") || slug.includes("debouch") || slug.includes("ontstopper")) score += 8;
+  }
+
+  const drainOdorContext =
+    /\b(odeur|odeurs|sentent|puanteur|mauvais|geur|smell)\b/.test(q) &&
+    /\b(canalisation|evacuation|siphon|wc|douche|evier|drain|afvoer)\b/.test(q);
+  if (drainOdorContext) {
+    if (title.includes("debouch") || slug.includes("debouch") || slug.includes("ontstopper") || title.includes("odeur")) {
+      score += 32;
+    }
+    if (slug.includes("pate-a-joint") || slug.includes("resine") || slug.includes("bande-abrasive") || slug.includes("pistolet")) {
+      score -= 24;
+    }
   }
 
   if (/\b(gourde|bouteille\s+de\s+boire|bouteille\s+isotherme)\b/.test(q) && /\b(fuit|fuite|fissure)\b/.test(q)) {
@@ -789,6 +807,7 @@ export async function lookupCatalogProductsByCitation(input: {
   const candidates = byName.filter(
     (p) =>
       !input.audience ||
+      productHasStrongExplicitMatch(p, [input.userQuery]) ||
       catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
   );
 
@@ -802,4 +821,36 @@ export async function lookupCatalogProductsByCitation(input: {
     .sort((a, b) => Number(b.codeHit) - Number(a.codeHit) || b.score - a.score);
 
   return scored.slice(0, input.limit ?? 2).map((item) => item.product);
+}
+
+/** Deterministic MODE 2 when the user cites a catalogue product by name (any profile/theme). */
+export async function lookupCitedCatalogProductForRecommendation(input: {
+  locale: "fr" | "nl" | "pl";
+  userQuery: string;
+  audience?: Audience | null;
+}): Promise<ProductKnowledgeRow | null> {
+  if (!hasNamedProductCitation(input.userQuery) || isExplicitProductLookupQuery(input.userQuery)) return null;
+
+  const byExplicitPattern = await fetchExplicitCatalogProducts(input.locale, input.userQuery);
+  const fromPattern = resolveDirectCitedProduct(input.userQuery, byExplicitPattern);
+  if (fromPattern) return fromPattern;
+
+  const products = await lookupCatalogProductsByCitation({
+    locale: input.locale,
+    userQuery: input.userQuery,
+    audience: input.audience ?? null,
+    limit: 5,
+  });
+  const fromCitation = resolveDirectCitedProduct(input.userQuery, products);
+  if (fromCitation) return fromCitation;
+
+  const broader = await searchProductKnowledge({
+    locale: input.locale,
+    theme: null,
+    tags: [],
+    userQuery: input.userQuery,
+    limit: 6,
+    audience: null,
+  });
+  return resolveDirectCitedProduct(input.userQuery, broader);
 }
