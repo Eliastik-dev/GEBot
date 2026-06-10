@@ -432,6 +432,7 @@ Rules:
 - Descaling / détartrage (échangeur à plaques, calcaire, tartre, Detartrans G60/G61…) is general_technical or product_info — NEVER leak_repair; "sous pression" alone in that context means operating regime, not a leak
 - Heating circuit maintenance (désembouage, inhibiteur, radiateur, plancher chauffant, G3/G10/G110, neutralisant…) is NOT thread paste — set fluid=chauffage when context is in transcript; NEVER add joint_service_fluid
 - Follow-ups like "un produit plus universel" after an inhibitor recommendation (G10 vs G110) are product_info — needs_clarification=false; use transcript heating context
+- Attribute follow-ups on an already recommended product (jaunissement, premium, couleur, temps de séchage, « est-ce que… », « ce produit… ») are product_info — needs_clarification=false; do NOT treat as a new recommendation request
 - Personal drinkware (gourde, bouteille de boisson réutilisable) with crack/leak is **out of GEB plumbing catalog** — intent general_technical, needs_clarification=false, do NOT add plumbing synonyms (ptfe, filasse, pâte joint, gebetanche)
 - A clogged/blocked radiator or uneven heating is general_technical (heating diagnostic), NOT pipe_repair
 - Be conservative on safety for leaks, but do NOT over-clarify non-safety queries

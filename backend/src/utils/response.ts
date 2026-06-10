@@ -1,6 +1,7 @@
 import { COMPLEMENTARY_HINTS } from "../config/constants.js";
 import type { Audience, HandoffPayload, Locale, Reseller } from "../types/index.js";
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
+import { removeAmazonSections } from "./amazon.js";
 import { detectTheme } from "./locale.js";
 import { decodeHtmlEntities, normalizeText } from "./text.js";
 
@@ -328,6 +329,48 @@ ${fdsLine}`;
 ### 📄 Documentation Officielle
 ${ftLine}
 ${fdsLine}`;
+}
+
+/**
+ * On product follow-ups, keep only conversational prose — drop repeated MODE 2 blocks.
+ */
+export function compactProductFollowUpAnswer(answer: string, priorProduct: string | null): string {
+  if (!priorProduct?.trim() || !answer.trim()) return answer;
+  const hasProductBlock = /###\s*📦\s*Produit Recommand/i.test(answer);
+  if (!hasProductBlock) return answer;
+
+  const stripped = removeAmazonSections(answer);
+  const productIdx = stripped.search(/###\s*📦\s*Produit Recommand/i);
+  if (productIdx < 0) return stripped.trim();
+
+  const opening = stripped.slice(0, productIdx).trim();
+  const afterProduct = stripped.slice(productIdx);
+  const docParts = afterProduct.split(/###\s*📄\s*Documentation[^\n]*/i);
+  const closing =
+    docParts.length > 1
+      ? docParts[1]!
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0 && !/^[-*]\s*\[/.test(line) && !/^https?:\/\//i.test(line))
+          .join("\n")
+          .trim()
+      : afterProduct
+          .replace(/###\s*📦\s*Produit Recommand[^\n]*[\s\S]*/i, "")
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0 && !/^[-*]\s/.test(line) && !/^###\s/.test(line))
+          .join("\n")
+          .trim();
+
+  const compacted =
+    closing.length >= 20
+      ? closing
+      : [opening, closing].filter(Boolean).join("\n\n");
+  if (!compacted.trim()) {
+    return stripAnswerWithoutProductRecommendation(stripped).replace(/\n{3,}/g, "\n\n").trim() || answer.trim();
+  }
+
+  return compacted.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** Strip purchase / store / documentation blocks when no product could be recommended. */

@@ -34,6 +34,7 @@ export function buildSystemPrompt(
   geoPolicy?: GeoPolicyContext,
   negativeExamples?: NegativeExample[],
   ongoingConversation = false,
+  productFollowUp?: { priorProduct: string } | null,
 ): string {
   const languageLabel =
     locale === "nl" ? "Dutch (Netherlands)" : locale === "pl" ? "Polish" : locale === "en" ? "English" : "French";
@@ -140,12 +141,25 @@ The context contains pre-verified GEB product records from the official catalog 
 ═══ CONVERSATION EN COURS (PRIORITÉ) ═══
 - L'utilisateur a déjà échangé avec vous dans cette session : **interdit** de recommencer par Bonjour, Hello, Salut, Hallo, etc.
 - Commencez directement par le fond (ex. « Pour votre fuite sur PVC… », « Concernant le G60… »).
-- Ne vous représentez pas ; pas de phrase d'accueil ni de récapitulatif de l'historique.`
+- Ne vous représentez pas ; pas de phrase d'accueil ni de récapitulatif de l'historique.
+- **Interdit** de répéter mot pour mot une réponse précédente : chaque tour doit apporter une réponse **nouvelle** à la question posée.`
+    : "";
+
+  const productFollowUpBlock = productFollowUp?.priorProduct
+    ? `
+═══ RELANCE SUR PRODUIT DÉJÀ CONSEILLÉ (PRIORITÉ ABSOLUE — MODE 1 UNIQUEMENT) ═══
+Produit déjà recommandé dans cette conversation : **${productFollowUp.priorProduct}**.
+- Répondez en **2 à 4 phrases** directement à la **nouvelle** question (oui/non, qualité, jaunissement, couleur, application…).
+- Référez-vous au produit au passé (« le ${productFollowUp.priorProduct} que je vous ai conseillé ») — ne le présentez pas comme une première découverte.
+- **INTERDIT** : bloc ### 📦 Produit Recommandé, ### 📄 Documentation Officielle, listes Description/Utilisation, ni répétition de la fiche technique déjà donnée.
+- Pas de re-introduction du cas d'usage (receveur, fuite, etc.) sauf si l'utilisateur change de contexte.
+- Si l'info manque dans le contexte, dites-le clairement sans inventer.`
     : "";
 
   return `You are GEBot — a friendly, empathetic senior technical advisor for GEB (sealing, plumbing, heating).
 You speak like a human expert in conversation, not a form-filling bot. You still follow rigorous verification before any product recommendation.
 ${ongoingBlock}
+${productFollowUpBlock}
 
 ═══ BREVITY (MANDATORY) ═══
 - **MODE 1:** max ~90 words total, 1–2 short paragraphs, at most one clarifying question.
