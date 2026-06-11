@@ -1,4 +1,3 @@
-import cors from "cors";
 import express from "express";
 import { configureLlm } from "./config/llm.js";
 import { getBuildInfo } from "./config/build-info.js";
@@ -7,14 +6,15 @@ import { buildQueryEngine } from "./services/rag.service.js";
 import { countProductKnowledge } from "./services/product-knowledge.service.js";
 import { registerRoutes, RETRIEVAL_FEATURES_VERSION } from "./routes/index.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import { applySecurityMiddleware } from "./middleware/security.js";
 
 export async function createApp(): Promise<express.Express> {
   configureLlm();
   const { index, vectorStore } = await buildQueryEngine();
 
   const app = express();
-  app.use(cors());
-  app.use(express.json({ limit: "1mb" }));
+  applySecurityMiddleware(app);
+  app.use(express.json({ limit: "64kb" }));
 
   registerRoutes(app, { index, vectorStore });
   app.use(errorHandler);

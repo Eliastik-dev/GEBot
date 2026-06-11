@@ -1,21 +1,14 @@
 import type { Request, Response } from "express";
 import { supabase } from "../config/supabase.js";
 import { scheduleRetrievalFeedback } from "../services/retrieval-feedback.service.js";
+import { safeErrorPayload } from "../utils/http.js";
+import type { feedbackBodySchema } from "../validation/schemas.js";
+import type { z } from "zod";
+
+type FeedbackBody = z.infer<typeof feedbackBodySchema>;
 
 export async function postFeedback(req: Request, res: Response) {
-    const body = req.body as { messageId?: string; sessionId?: string; feedback?: number };
-    const messageId = body.messageId?.trim();
-    const sessionId = body.sessionId?.trim();
-    const feedback = body.feedback;
-
-    if (!messageId || !sessionId) {
-      res.status(400).json({ error: "Missing messageId or sessionId" });
-      return;
-    }
-    if (feedback !== 1 && feedback !== -1 && feedback !== 0) {
-      res.status(400).json({ error: "feedback must be 1, -1, or 0" });
-      return;
-    }
+    const { messageId, sessionId, feedback } = req.body as FeedbackBody;
 
     try {
       const { error } = await supabase
@@ -39,6 +32,7 @@ export async function postFeedback(req: Request, res: Response) {
       res.json({ ok: true, messageId, feedback });
     } catch (err) {
       console.error("[/api/feedback] error:", err);
-      res.status(500).json({ error: err instanceof Error ? err.message : "Internal error" });
+      const message = err instanceof Error ? err.message : "Internal error";
+      res.status(500).json(safeErrorPayload(message, err));
     }
 }

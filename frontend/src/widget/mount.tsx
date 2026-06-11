@@ -16,13 +16,18 @@ type Mounted = {
 const mountedByTarget = new WeakMap<HTMLElement, Mounted>();
 
 export function mountGebWidget(opts: MountOptions): Mounted {
+  if (!opts.target || !opts.target.isConnected) {
+    throw new Error("GEBot widget mount target must be a connected DOM element.");
+  }
+
   const previous = mountedByTarget.get(opts.target);
   if (previous) {
     previous.unmount();
   }
 
   const container = document.createElement("div");
-  container.setAttribute("data-gebot-widget", "true");
+  container.setAttribute("data-gebot-widget", "root");
+  container.setAttribute("data-gebot-isolation", "scoped");
   opts.target.appendChild(container);
 
   const root = createRoot(container);

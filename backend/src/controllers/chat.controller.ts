@@ -35,9 +35,14 @@ import { formatNamedProductCitationPrompt, hasNamedProductCitation, isExplicitPr
 import { containsCompetitorBrandMention, sanitizeCompetitorBrandMentions } from "../utils/brand-policy.js";
 import { buildNoContextFallback, extractFluid, getGenericNoAnswerFallback, hasOngoingConversation, isInformationalProductQuestion, resolveClarificationContext, toAudienceLabel, toHistoryPrompt } from "../utils/text.js";
 import { resolveJointPasteClarificationContext } from "../utils/joint-paste.js";
+import { safeErrorPayload, isProduction } from "../utils/http.js";
 import { getIncomingSessionId } from "../utils/session.js";
 import { startSse, sseWrite } from "../utils/sse.js";
+import type { chatBodySchema } from "../validation/schemas.js";
 import type { VectorStoreIndex } from "llamaindex";
+import type { z } from "zod";
+
+type ValidatedChatBody = z.infer<typeof chatBodySchema>;
 
 export type ChatDeps = { index: VectorStoreIndex; vectorStore: unknown };
 
@@ -58,23 +63,19 @@ function filterRetrievalNodesByFeedbackPenalties(nodes: unknown[], penalizeSlugs
 
 export async function postChat(req: Request, res: Response, deps: ChatDeps) {
     const startedAt = Date.now();
-    const body = (req.body ?? {}) as ChatRequestBody;
-    const message = (body.message ?? "").trim();
+    const body = req.body as ValidatedChatBody;
+    const message = body.message;
     const locale = normalizeLocale(body.locale);
     const profileFromMetadata = normalizeAudience(body.profile);
-    const sessionId = getIncomingSessionId(req, body);
-    const geoConsentFromBody = typeof body.geoConsent === "boolean" ? body.geoConsent : undefined;
-    const geoCountryFromBody = typeof body.geoCountry === "string" ? body.geoCountry.toUpperCase() : null;
-    if (!message) {
-      res.status(400).json({ error: "Missing 'message'" });
-      return;
-    }
+    const sessionId = getIncomingSessionId(req, body as ChatRequestBody);
+    const geoConsentFromBody = body.geoConsent;
+    const geoCountryFromBody = body.geoCountry ?? null;
 
     try {
       console.log("[/api/chat] incoming", {
         sessionId,
         locale,
-        message,
+        message: isProduction() ? `${message.slice(0, 120)}…` : message,
         profile: body.profile ?? null,
         geoConsent: geoConsentFromBody ?? null,
         geoCountry: geoCountryFromBody,
@@ -1031,10 +1032,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
           "logQuery.generation_error",
         );
         if (!res.headersSent) {
-          res.status(500).json({
-            error: generationError,
-            stack: err instanceof Error ? err.stack : undefined,
-          });
+          res.status(500).json(safeErrorPayload(generationError, err));
         } else {
           const escalation = buildEscalationSection(locale, audience);
           if (escalation) {
@@ -1042,10 +1040,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
           }
           sseWrite(
             res,
-            {
-              error: generationError,
-              stack: err instanceof Error ? err.stack : undefined,
-            },
+            safeErrorPayload(generationError, err),
             "error",
           );
           sseWrite(res, { done: true, sessionId, audience }, "done");
@@ -1267,17 +1262,11 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
           }),
           "logQuery.fatal_error",
         );
-        res.status(500).json({
-          error: errorMessage,
-          stack: err instanceof Error ? err.stack : undefined,
-        });
+        res.status(500).json(safeErrorPayload(errorMessage, err));
       } else {
         sseWrite(
           res,
-          {
-            error: errorMessage,
-            stack: err instanceof Error ? err.stack : undefined,
-          },
+          safeErrorPayload(errorMessage, err),
           "error",
         );
         sseWrite(res, { done: true, sessionId, responseMs: Date.now() - startedAt, geoCountry: geoCountryFromBody }, "done");

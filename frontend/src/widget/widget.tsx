@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
+import { SafeMarkdown } from "../components/SafeMarkdown.js";
+import { sanitizeTel } from "../utils/safeUrl.js";
 import i18n from "../i18n.js";
 import { generateId } from "../utils/generateId.js";
 
@@ -47,13 +48,13 @@ function cn(...v: Array<string | false | null | undefined>) {
   return v.filter(Boolean).join(" ");
 }
 
-/** Vide le stockage au chargement : nouvelle session / état chat, mais garde position widget + préférences géoloc. */
+/** Clear only GEBot-owned keys — never touch the host WordPress localStorage. */
 function clearGebotEphemeralLocalStorage(): void {
   if (typeof window === "undefined") return;
   const preserveKeys = new Set(["gebot_geo_consent", "gebot_geo_country"]);
   for (let i = window.localStorage.length - 1; i >= 0; i -= 1) {
     const key = window.localStorage.key(i);
-    if (!key) continue;
+    if (!key?.startsWith("gebot_")) continue;
     if (preserveKeys.has(key)) continue;
     if (/position/i.test(key)) continue;
     window.localStorage.removeItem(key);
@@ -85,10 +86,10 @@ async function streamChat(
       message,
       sessionId,
       locale,
-      profile,
-      theme,
+      ...(profile ? { profile } : {}),
+      ...(theme ? { theme } : {}),
       geoConsent: geoConsent === "accepted" ? true : geoConsent === "declined" ? false : undefined,
-      geoCountry,
+      ...(geoCountry ? { geoCountry } : {}),
     }),
   });
   if (!res.ok || !res.body) {
@@ -565,27 +566,7 @@ export function Widget({ apiBaseUrl }: Props) {
                       isUser ? (
                         m.content
                       ) : (
-                        <ReactMarkdown
-                          components={{
-                            h3: ({ children }) => (
-                              <h3 className="mt-1.5 mb-0.5 text-xs font-semibold text-[#1A2B4B] first:mt-0 sm:mt-2 sm:mb-1 sm:text-sm">{children}</h3>
-                            ),
-                            ul: ({ children }) => <ul className="my-0.5 list-disc pl-3.5 sm:my-1 sm:pl-4">{children}</ul>,
-                            li: ({ children }) => <li className="mb-0.5 sm:mb-1">{children}</li>,
-                            a: ({ href, children }) => (
-                              <a
-                                href={href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex rounded-md bg-[#1466AC]/12 px-1.5 py-0.5 text-[11px] text-[#1466AC] hover:bg-[#1466AC]/20 sm:px-2 sm:py-1 sm:text-xs"
-                              >
-                                {children}
-                              </a>
-                            ),
-                          }}
-                        >
-                          {m.content}
-                        </ReactMarkdown>
+                        <SafeMarkdown content={m.content} />
                       )
                     ) : busy && idx === msgs.length - 1 ? (
                       <span className="opacity-70">…</span>
@@ -693,7 +674,10 @@ export function Widget({ apiBaseUrl }: Props) {
               <button
                 type="button"
                 className="mb-1.5 w-full truncate rounded-md bg-[#1466AC] px-2 py-0.5 text-[10px] font-semibold leading-tight text-white hover:brightness-95 sm:mb-2 sm:text-[11px]"
-                onClick={() => window.open(`tel:${handoff.phone.replace(/\s+/g, "")}`, "_self")}
+                onClick={() => {
+                  const tel = sanitizeTel(handoff.phone);
+                  if (tel) window.open(`tel:${tel}`, "_self");
+                }}
               >
                 {handoff.label}: {handoff.phone}
               </button>
@@ -708,6 +692,7 @@ export function Widget({ apiBaseUrl }: Props) {
                 style={{ borderColor: "rgba(20,102,172,0.35)" }}
                 placeholder={t("inputPlaceholder")}
                 value={input}
+                maxLength={4000}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") onSend();

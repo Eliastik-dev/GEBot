@@ -1,10 +1,18 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { getBuildInfo } from "../config/build-info.js";
 import { env } from "../config/env.js";
 import { supabase } from "../config/supabase.js";
 import { postChat, type ChatDeps } from "../controllers/chat.controller.js";
 import { getGeolocation } from "../controllers/geolocation.controller.js";
 import { postFeedback } from "../controllers/feedback.controller.js";
+import {
+  chatRateLimiter,
+  feedbackRateLimiter,
+  geolocationRateLimiter,
+} from "../middleware/security.js";
+import { validateBody, validateQuery } from "../middleware/validate.js";
+import { isProduction } from "../utils/http.js";
+import { chatBodySchema, feedbackBodySchema, geolocationQuerySchema } from "../validation/schemas.js";
 import {
   countProductKnowledge,
   getProductKnowledgeBySlug,
@@ -16,10 +24,22 @@ import { productKnowledgeLocale } from "../services/product-router.service.js";
 export const RETRIEVAL_FEATURES_VERSION = "2026-06-08-direct-sheet-citation";
 
 export function registerRoutes(app: Express, chatDeps: ChatDeps): void {
-  app.get("/api/geolocation", getGeolocation);
-  app.post("/api/chat", (req, res) => postChat(req, res, chatDeps));
-  app.post("/api/feedback", postFeedback);
-  app.get("/health", async (_req, res) => {
+  app.get(
+    "/api/geolocation",
+    geolocationRateLimiter,
+    validateQuery(geolocationQuerySchema),
+    getGeolocation,
+  );
+  app.post(
+    "/api/chat",
+    chatRateLimiter,
+    validateBody(chatBodySchema),
+    (req, res) => postChat(req, res, chatDeps),
+  );
+  app.post("/api/feedback", feedbackRateLimiter, validateBody(feedbackBodySchema), postFeedback);
+  app.get("/health", async (req: Request, res: Response) => {
+    const detailToken = typeof req.query.token === "string" ? req.query.token : "";
+    const showDetails = !isProduction() || (env.HEALTH_DETAIL_TOKEN !== "" && detailToken === env.HEALTH_DETAIL_TOKEN);
     const build = getBuildInfo();
     const pkLocale = productKnowledgeLocale("fr");
     let supabaseOk = false;
@@ -48,6 +68,10 @@ export function registerRoutes(app: Express, chatDeps: ChatDeps): void {
     }
     const catalogReady =
       env.PRODUCT_KNOWLEDGE_ENABLED && productKnowledgeFr !== null && productKnowledgeFr > 0;
+    if (!showDetails) {
+      res.json({ ok: supabaseOk });
+      return;
+    }
     res.json({
       ok: true,
       commit: build.commit,

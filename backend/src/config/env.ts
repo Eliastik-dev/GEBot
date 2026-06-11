@@ -6,7 +6,21 @@ function required(name: string): string {
   return v;
 }
 
+function parseCsv(value: string | undefined): string[] {
+  if (!value?.trim()) return [];
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
 export const env = {
+  NODE_ENV: (process.env.NODE_ENV ?? "development") as "development" | "production" | "test",
+  /** Comma-separated browser origins allowed to call the API (in addition to WP_URL). */
+  CORS_ALLOWED_ORIGINS: parseCsv(process.env.CORS_ALLOWED_ORIGINS),
+  /** Max characters accepted in a chat message after sanitization. */
+  CHAT_MESSAGE_MAX_LENGTH: Number(process.env.CHAT_MESSAGE_MAX_LENGTH ?? "4000"),
+  /** Trust X-Forwarded-For when behind Nginx/reverse proxy. */
+  TRUST_PROXY: process.env.TRUST_PROXY !== "false",
+  /** Optional bearer for verbose /health diagnostics in production. */
+  HEALTH_DETAIL_TOKEN: process.env.HEALTH_DETAIL_TOKEN ?? "",
   MISTRAL_API_KEY: required("MISTRAL_API_KEY"),
   MISTRAL_EMBED_BATCH_SIZE: Number(process.env.MISTRAL_EMBED_BATCH_SIZE ?? "32"),
   /** Pause between embedding HTTP calls (ms). Helps stay under Mistral req/min on free tier (~60). */

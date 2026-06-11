@@ -1,13 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type express from "express";
 import type { ChatRequestBody } from "../types/index.js";
+import { isValidUuid } from "./sanitize.js";
+
+function resolveSessionId(candidate: string | undefined): string | null {
+  const trimmed = candidate?.trim() ?? "";
+  if (!trimmed) return null;
+  return isValidUuid(trimmed) ? trimmed : null;
+}
 
 export function getIncomingSessionId(req: express.Request, body: ChatRequestBody): string {
-  const fromBody = (body.sessionId ?? "").trim();
-  if (fromBody) return fromBody;
-  const fromHeader = req.header("x-session-id")?.trim() ?? "";
-  if (fromHeader) return fromHeader;
-  return randomUUID();
+  return (
+    resolveSessionId(body.sessionId) ??
+    resolveSessionId(req.header("x-session-id") ?? undefined) ??
+    randomUUID()
+  );
 }
 
 
