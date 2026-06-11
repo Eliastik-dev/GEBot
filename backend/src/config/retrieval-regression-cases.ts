@@ -47,6 +47,17 @@ export const RETRIEVAL_REGRESSION_CASES: RetrievalRegressionCase[] = [
     intent: "sealing_assembly",
   },
   {
+    id: "bande-reparation-pvc-fuite",
+    locale: "fr",
+    theme: "plomberie",
+    audience: "particulier",
+    query:
+      "est-ce que je peux réparer une fuite sur une canalisation PVC avec la bande réparation sous pression",
+    expectedSlugs: ["bande-de-reparation"],
+    forbiddenSlugs: ["gebetanche", "gebsoplast", "colle-haute-performance"],
+    intent: "product_info",
+  },
+  {
     id: "plomberie-abs-colle-pro",
     locale: "fr",
     theme: "plomberie",

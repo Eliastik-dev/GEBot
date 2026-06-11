@@ -30,7 +30,22 @@ export function isInformationalProductQuestion(query: string): boolean {
   return (
     /\b(existe|existe t il|disponible|couleur|couleurs|teint|teinter|teintable|peut on|peut on le|est ce que|est ce qu|est ce|combien|quelle taille|quelle couleur|plusieurs|variante|version|gamme|reference|jaunir|jaunissement|premium|qualite|resiste|resistant|fongicide|durable|odeur|incolore|transparent)\b/.test(
       q,
-    ) || (/\?\s*$/.test(query.trim()) && /\b(le|la|les|ce|cette|produit|email|silicone|mastic|il|un)\b/.test(q))
+    ) ||
+    isCompatibilitySpecQuestion(query) ||
+    (/\?\s*$/.test(query.trim()) && /\b(le|la|les|ce|cette|produit|email|silicone|mastic|il|un)\b/.test(q))
+  );
+}
+
+/** Yes/no or factual question about material/fluid/support compatibility from datasheets. */
+export function isCompatibilitySpecQuestion(query: string): boolean {
+  const q = normalizeText(query);
+  return (
+    /\b(compatible|compatibilite|incompatible|convient|utilisable|utiliser sur|support|materiau|matiere|substrat|adherence|pvc|abs|pehd|polyethylene|polypropylene|cuivre|acier|inox|aluminium|carrelage|beton|bois|platre|email|fonte|zinc)\b/.test(
+      q,
+    ) &&
+    /\b(peut|peut on|est ce|est il|convient|utilisable|compatible|support|adherence|sur le|sur la|avec le|avec la|pour le|pour la)\b/.test(
+      q,
+    )
   );
 }
 

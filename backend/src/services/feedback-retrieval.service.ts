@@ -60,14 +60,40 @@ function getEmbedClient(): Mistral {
   return embedClient;
 }
 
+const EMBED_BATCH_SIZE = 8;
+const EMBED_MAX_CHARS = 1_200;
+const EMBED_MIN_CHARS = 8;
+
+function sanitizeEmbedInput(text: string): string {
+  return text
+    .slice(0, EMBED_MAX_CHARS)
+    .replace(/[\u0000-\u001f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function embedTexts(texts: string[]): Promise<number[][]> {
-  if (texts.length === 0) return [];
+  const sanitized = texts.map((t) => sanitizeEmbedInput(t));
+  const vectors: number[][] = sanitized.map(() => []);
+  const pending: Array<{ index: number; text: string }> = [];
+  for (let i = 0; i < sanitized.length; i++) {
+    const text = sanitized[i]!;
+    if (text.length >= EMBED_MIN_CHARS) pending.push({ index: i, text });
+  }
+  if (pending.length === 0) return vectors;
+
   const client = getEmbedClient();
-  const { data } = await client.embeddings.create({
-    model: "mistral-embed",
-    inputs: texts,
-  });
-  return data.map((row) => row.embedding ?? []);
+  for (let i = 0; i < pending.length; i += EMBED_BATCH_SIZE) {
+    const batch = pending.slice(i, i + EMBED_BATCH_SIZE);
+    const { data } = await client.embeddings.create({
+      model: "mistral-embed",
+      inputs: batch.map((item) => item.text),
+    });
+    for (let j = 0; j < batch.length; j++) {
+      vectors[batch[j]!.index] = data[j]?.embedding ?? [];
+    }
+  }
+  return vectors;
 }
 
 function normalizeSlugList(slugs: unknown): string[] {
@@ -177,6 +203,8 @@ export async function resolveFeedbackRetrievalContext(
   };
   if (!query) return empty;
 
+  const embedQuery = query.slice(0, EMBED_MAX_CHARS);
+
   const [sessionPenalties, sessionBoosts, positiveRows, negativeRows] = await Promise.all([
     sessionId ? loadSessionDislikedSlugs(sessionId) : Promise.resolve([]),
     sessionId ? loadSessionLikedSlugs(sessionId) : Promise.resolve([]),
@@ -205,7 +233,7 @@ export async function resolveFeedbackRetrievalContext(
 
   try {
     const allRows = [...positivePool, ...negativePool];
-    const vectors = await embedTexts([query, ...allRows.map((row) => feedbackEmbeddingText(row))]);
+    const vectors = await embedTexts([embedQuery, ...allRows.map((row) => feedbackEmbeddingText(row))]);
     const queryVec = vectors[0];
     if (!queryVec) {
       return {

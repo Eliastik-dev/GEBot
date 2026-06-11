@@ -33,15 +33,17 @@ export const env = {
   PORT: Number(process.env.PORT ?? "8787"),
   SUPABASE_TABLE: process.env.SUPABASE_TABLE ?? "documents",
   /** Chunks passed to the LLM after hybrid rerank / technical prioritization (TDS + SDS coverage). */
-  TOP_K: Number(process.env.TOP_K ?? "10"),
+  TOP_K: Number(process.env.TOP_K ?? "24"),
   /** Vector search retrieves TOP_K * this many candidates before lexicon rerank. */
   RETRIEVAL_POOL_MULTIPLIER: Number(process.env.RETRIEVAL_POOL_MULTIPLIER ?? "3"),
-  /** Hard cap on nodes injected into the query engine (limits prompt size). */
-  DIAGNOSTIC_MAX_CONTEXT_NODES: Number(process.env.DIAGNOSTIC_MAX_CONTEXT_NODES ?? "12"),
+  /** Max nodes injected into the LLM context (catalog blocks + FT/FDS chunks). */
+  DIAGNOSTIC_MAX_CONTEXT_NODES: Number(process.env.DIAGNOSTIC_MAX_CONTEXT_NODES ?? "128"),
+  /** Max FT/FDS chunks retrieved per product slug (full datasheet ≈ 5–20 chunks). */
+  PDF_CHUNKS_PER_SLUG: Number(process.env.PDF_CHUNKS_PER_SLUG ?? "48"),
   /** Distinct source URLs listed in the prompt footer. */
-  DIAGNOSTIC_MAX_SOURCE_URLS: Number(process.env.DIAGNOSTIC_MAX_SOURCE_URLS ?? "6"),
+  DIAGNOSTIC_MAX_SOURCE_URLS: Number(process.env.DIAGNOSTIC_MAX_SOURCE_URLS ?? "12"),
   CHAT_HISTORY_LIMIT: Number(process.env.CHAT_HISTORY_LIMIT ?? "10"),
-  QUERY_CACHE_TTL_MS: Number(process.env.QUERY_CACHE_TTL_MS ?? "300000"),
+  QUERY_CACHE_TTL_MS: Number(process.env.QUERY_CACHE_TTL_MS ?? "120000"),
   MISTRAL_CHAT_MODEL: process.env.MISTRAL_CHAT_MODEL ?? "mistral-small-latest",
   MISTRAL_CHAT_FALLBACK_MODELS: process.env.MISTRAL_CHAT_FALLBACK_MODELS ?? "",
   /** Cap generation length (concise answers). */

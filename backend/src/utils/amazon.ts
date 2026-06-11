@@ -241,7 +241,17 @@ export function extractRecommendedProduct(answer: string): string | null {
   const fallback = answer.match(/recommended product\s*:\s*\*\*([^*]+)\*\*/i);
   if (fallback?.[1]) return decodeHtmlEntities(fallback[1].trim());
   const plainFallback = answer.match(/recommended product\s*:\s*([^\n\r*][^\n\r]+)/i);
-  return plainFallback?.[1] ? decodeHtmlEntities(plainFallback[1].trim()) : null;
+  if (plainFallback?.[1]) return decodeHtmlEntities(plainFallback[1].trim());
+  return extractBoldCatalogProductName(answer);
+}
+
+/** MODE 1 answers that name a product in bold without the MODE 2 heading block. */
+export function extractBoldCatalogProductName(answer: string): string | null {
+  for (const match of answer.matchAll(/\*\*([^*]{3,80})\*\*/g)) {
+    const label = cleanRecommendedProductLabel(match[1]?.trim() ?? "");
+    if (label) return label;
+  }
+  return null;
 }
 
 

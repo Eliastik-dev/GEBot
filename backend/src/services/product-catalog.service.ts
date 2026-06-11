@@ -38,28 +38,39 @@ export async function extractPdfText(sourceUrl: string): Promise<string> {
   }
 }
 
-/** Try FT URL first, then FDS — some scraped FT links return 404 while SDS is available. */
+/** Merge FT + FDS text when both exist — synthesis must not miss compatibility tables split across sheets. */
 export async function extractProductPdfText(
   row: Pick<ScrapedProductRow, "ft_url" | "fds_url" | "slug">,
 ): Promise<{ text: string; sourceUrl: string } | null> {
-  const candidates = [row.ft_url, row.fds_url].filter(
-    (url): url is string => typeof url === "string" && url.length > 0,
-  );
+  const candidates: Array<{ url: string; label: string }> = [];
+  if (typeof row.ft_url === "string" && row.ft_url.length > 0) {
+    candidates.push({ url: row.ft_url, label: "FT" });
+  }
+  if (typeof row.fds_url === "string" && row.fds_url.length > 0) {
+    candidates.push({ url: row.fds_url, label: "FDS" });
+  }
 
-  for (const url of candidates) {
+  const parts: string[] = [];
+  const sourceUrls: string[] = [];
+
+  for (const candidate of candidates) {
     try {
-      const text = await extractPdfText(url);
+      const text = await extractPdfText(candidate.url);
       if (text.length >= 80) {
-        return { text, sourceUrl: url };
+        parts.push(`=== ${candidate.label} ===\n${text}`);
+        sourceUrls.push(candidate.url);
       }
     } catch (err) {
       const status = (err as { response?: { status?: number } })?.response?.status;
-      console.warn(
-        `[catalog] PDF ${status ?? "error"} for ${row.slug}: ${url}`,
-      );
+      console.warn(`[catalog] PDF ${status ?? "error"} for ${row.slug}: ${candidate.url}`);
     }
   }
-  return null;
+
+  if (parts.length === 0) return null;
+  return {
+    text: parts.join("\n\n"),
+    sourceUrl: sourceUrls[0] ?? "",
+  };
 }
 
 export function getScrapeOutputPath(): string {

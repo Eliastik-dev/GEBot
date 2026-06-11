@@ -158,7 +158,7 @@ export async function saveMessage(
 export async function loadRecentMessages(sessionId: string): Promise<StoredMessage[]> {
   const { data, error } = await supabase
     .from("chat_messages")
-    .select("role, content")
+    .select("role, content, response_context")
     .eq("session_id", sessionId)
     .order("created_at", { ascending: false })
     .limit(Math.max(env.CHAT_HISTORY_LIMIT, 30));

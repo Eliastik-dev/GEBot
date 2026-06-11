@@ -170,7 +170,83 @@ export function extractProductSearchTerms(texts: string[]): string[] {
     }
   }
 
-  return [...terms].filter((term) => term.length >= 2);
+  return [...terms].filter((term) => sanitizeIlikeSearchTerm(term) !== null);
+}
+
+/** Product-like phrases after articles (la bande réparation, le ms zinc, etc.). */
+export function extractProductPhraseCandidates(text: string): string[] {
+  const q = normalizeProductMentionText(decodeHtmlEntities(text));
+  const phrases = new Set<string>();
+
+  for (const m of q.matchAll(
+    /\b(?:la|le|les|du|de|des|un|une|avec|pour|sur|chez)\s+((?:[a-z0-9][a-z0-9-]*\s+){0,5}[a-z0-9][a-z0-9-]*)/g,
+  )) {
+    const phrase = (m[1] ?? "").trim();
+    if (phrase.length < 4) continue;
+    if ([...MENTION_STOP_WORDS].some((w) => phrase === w)) continue;
+    phrases.add(phrase);
+  }
+
+  const stripped = q
+    .replace(/\b(est ce que|est ce qu|peut on|puis je|je peux|comment|pourquoi|quelle|quel|quels|quelles)\b/g, " ")
+    .replace(/\b(fuite|fuites|canalisation|tuyau|tuyaux|pvc|abs|pehd|pression|reparer|reparation|avec|pour|sur|sous|gravitaire)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const strippedTokens = tokenizeProductMention(stripped);
+  const productishTokens = strippedTokens.filter((token) => !MENTION_STOP_WORDS.has(token));
+  if (
+    stripped.length >= 4 &&
+    productishTokens.length >= 1 &&
+    !/[,;:!?]/.test(stripped) &&
+    stripped.split(/\s+/).length <= 5
+  ) {
+    phrases.add(stripped);
+  }
+
+  return [...phrases];
+}
+
+/** Safe term for PostgREST `.or(canonical_name.ilike.%term%)` filters — rejects sentences and punctuation. */
+export function sanitizeIlikeSearchTerm(term: string): string | null {
+  const t = term.trim().replace(/\s+/g, " ");
+  if (t.length < 2 || t.length > 48) return null;
+  if (/[,;()%\\]/.test(t)) return null;
+  const words = t.split(/\s+/);
+  if (words.length > 4) return null;
+  const norm = normalizeProductMentionText(t);
+  if (words.length >= 3 && /\b(merci|non|puis|acheter|revendeur|magasin)\b/.test(norm)) return null;
+  return t.replace(/[%_]/g, "");
+}
+
+/** All terms used to fuzzy-search the catalogue — no product whitelist. */
+export function collectCatalogSearchTerms(text: string): string[] {
+  const terms = new Set<string>();
+  for (const t of extractProductSearchTerms([text])) terms.add(t);
+  for (const t of extractCitedProductSearchTerms(text)) terms.add(t);
+  for (const phrase of extractProductPhraseCandidates(text)) {
+    terms.add(phrase);
+    terms.add(phrase.replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, ""));
+    for (const token of tokenizeProductMention(phrase)) {
+      if (token.length >= 3 || SHORT_MENTION_TOKENS.has(token)) terms.add(token);
+    }
+    const parts = phrase.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      terms.add(parts.slice(0, 2).join("-"));
+      terms.add(parts.slice(0, 3).join("-"));
+    }
+  }
+  for (const code of extractCatalogProductCodes(text)) terms.add(code);
+  return [...terms].filter((term) => sanitizeIlikeSearchTerm(term) !== null);
+}
+
+/** Heuristic: user may be naming a catalogue product (sync — DB match confirms via detectCatalogProductCitations). */
+export function mentionsLikelyProductPhrase(text: string): boolean {
+  if (extractCatalogProductCodes(text).length > 0) return true;
+  const q = normalizeProductMentionText(text);
+  if (CATALOG_PRODUCT_FAMILY_RE.test(q)) return true;
+  if (/\b(avec|pour|sur)\s+(la|le|les|un|une)\s+\w{3,}/.test(q)) return true;
+  if (/\b(fiche\s+technique|fiche\s+produit|fds|ft\b|tds)\b/.test(q)) return true;
+  return collectCatalogSearchTerms(text).length >= 2;
 }
 
 function productText(product: ProductKnowledgeRow): { title: string; slug: string; slugSpaced: string } {
@@ -291,19 +367,30 @@ export function resolveDirectTechnicalSheetProduct(
   return best?.product ?? null;
 }
 
-export function hasNamedProductCitation(text: string): boolean {
-  if (extractCatalogProductCodes(text).length > 0) return true;
+/** User asks whether a cited catalogue product fits their case (yes/no, compatibilité). */
+export function isProductCompatibilityAsk(text: string): boolean {
+  return isFactualProductQuestion(text) && mentionsLikelyProductPhrase(text);
+}
+
+/** Yes/no, compatibilité, limites d'usage — not an open-ended product recommendation. */
+export function isFactualProductQuestion(text: string): boolean {
   const q = normalizeProductMentionText(text);
-  if (CATALOG_PRODUCT_FAMILY_RE.test(q)) return true;
   return (
-    /\b(inhibiteur|desembou|gebsoplast|collex|ms[\s-]?zinc|toiturol|silicone|chrono)\b/.test(q) &&
-    /\b(g\d+|univ|universel)\b/.test(q)
+    /\b(peut|peut on|est ce|est il|compatible|utilisable|utiliser|conviend|conven|admissible|ok pour|conforme|adapte)\b/.test(
+      q,
+    ) ||
+    /\b(existe|disponible|couleur|teint|jaunir|resiste|durable|odeur|incolore|transparent)\b/.test(q) ||
+    (/\?\s*$/.test(text.trim()) && /\b(le|la|les|ce|cette|produit|il|un)\b/.test(q))
   );
+}
+
+/** @deprecated Prefer detectCatalogProductCitations() — sync heuristic only. */
+export function hasNamedProductCitation(text: string): boolean {
+  return mentionsLikelyProductPhrase(text);
 }
 
 /** Search terms when the user cites a product by code/name (without fiche technique). */
 export function extractCitedProductSearchTerms(text: string): string[] {
-  if (!hasNamedProductCitation(text)) return [];
   const terms = new Set<string>();
   const q = normalizeProductMentionText(decodeHtmlEntities(text));
   for (const code of extractCatalogProductCodes(q)) {
@@ -325,14 +412,18 @@ export function extractCitedProductSearchTerms(text: string): string[] {
   return [...terms].filter((term) => term.length >= 2);
 }
 
-export function formatNamedProductCitationPrompt(text: string): string {
-  if (!hasNamedProductCitation(text)) return "";
+export function formatNamedProductCitationPrompt(text: string, resolvedProductName?: string | null): string {
+  if (!mentionsLikelyProductPhrase(text) && !resolvedProductName) return "";
   const codes = extractCatalogProductCodes(text);
-  const codeHint =
-    codes.length > 0
+  const productHint = resolvedProductName
+    ? ` **${resolvedProductName.trim()}**`
+    : codes.length > 0
       ? ` le(s) produit(s) catalogue ${codes.map((c) => c.toUpperCase()).join(", ")}`
-      : " un produit GEB par son nom ou sa famille";
-  return `\nCITATION_PRODUIT: L'utilisateur cite explicitement${codeHint}. Les blocs correspondants sont en tête du contexte. Répondez en MODE 2 sur ce produit (usage, compatibilité, limites) — ignorez profil et domaine de session si le nom cité correspond à la fiche. Interdit d'affirmer qu'il est absent du catalogue GEB si un bloc le décrit.`;
+      : " un produit GEB identifié dans le catalogue";
+  if (isFactualProductQuestion(text)) {
+    return `\nCITATION_PRODUIT: L'utilisateur pose une question factuelle sur${productHint}. MODE 1 : répondez oui/non ou la limite exacte en citant FT/FDS. Ne recommandez PAS un autre SKU si la question porte sur le produit cité. Interdit d'affirmer qu'aucune fiche GEB ne couvre ce cas si les extraits FT/FDS sont présents.`;
+  }
+  return `\nCITATION_PRODUIT: Contexte centré sur${productHint}. Répondez sur CE produit (usage, compatibilité, limites). Interdit d'affirmer qu'il est absent du catalogue si un bloc ou une FT le décrit.`;
 }
 
 /** Best catalogue match when the user cites a product by name (not a fiche technique request). */
@@ -340,7 +431,7 @@ export function resolveDirectCitedProduct(
   userQuery: string,
   products: ProductKnowledgeRow[],
 ): ProductKnowledgeRow | null {
-  if (!hasNamedProductCitation(userQuery) || isExplicitProductLookupQuery(userQuery) || products.length === 0) {
+  if (isExplicitProductLookupQuery(userQuery) || products.length === 0) {
     return null;
   }
 

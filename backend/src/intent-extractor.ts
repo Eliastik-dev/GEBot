@@ -76,6 +76,7 @@ import {
   isBuildingEnvelopeLeakContext,
   isPersonalDrinkwareOutOfCatalog,
 } from "./utils/diagnostic-rules.js";
+import { mentionsLikelyProductPhrase } from "./utils/product-mention.js";
 
 function normalizeExtractionText(value: string): string {
   return value
@@ -164,19 +165,13 @@ function leakRequiresPressureContext(
   faucetLeak: boolean,
 ): boolean {
   if (faucetLeak) return false;
+  if (mentionsLikelyProductPhrase(conversationText)) return false;
   const t = normalizeExtractionText(conversationText);
-  if (merged.safety_keywords.includes("gas") || merged.fluid === "gaz" || SAFETY_PATTERNS.fluid_gas.test(t)) {
-    return true;
-  }
-  if (/\b(gouttiere|zinguerie|silicone|mastic|robinet|mitigeur|facade|carrelage|cheminee|insert)\b/.test(t)) {
-    return false;
-  }
-  if (/\b(raccord|filetage|joint|colonne\s+de\s+douche)\b/.test(t) && !/\b(tuyau|tube|canalisation)\b/.test(t)) {
-    return false;
-  }
   return (
-    /\b(tuyau|tube|canalisation|pvc|cuivre|pehd|multicouche)\b/.test(t) &&
-    (/\b(fuite|fissure|trou|perce|casse)\b/.test(t) || merged.intent === "pipe_repair")
+    merged.safety_keywords.includes("gas") ||
+    merged.fluid === "gaz" ||
+    SAFETY_PATTERNS.fluid_gas.test(t) ||
+    /\b(gpl|butane|propane)\b/.test(t)
   );
 }
 

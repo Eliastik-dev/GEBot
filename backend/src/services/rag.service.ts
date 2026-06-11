@@ -1,11 +1,11 @@
 import { storageContextFromDefaults, VectorStoreIndex } from "llamaindex";
 import { SupabaseVectorStore } from "@llamaindex/supabase";
 import { env } from "../config/env.js";
-import { GEO_TIMEOUT_MS, RESELLER_CACHE_TTL_MS, RESELLER_DIRECTORY_URL } from "../config/constants.js";
+import { GEO_TIMEOUT_MS, RESELLER_CACHE_TTL_MS, RESELLER_DIRECTORY_URL, VECTOR_SEARCH_TIMEOUT_MS } from "../config/constants.js";
 import type { Locale, ProductTheme, Reseller, StoredMessage } from "../types/index.js";
 import { hasDescalingContext, hasHeatingCircuitContext, hasInaccessibleThreadedJointForResinContext, isJointSealingAssemblyWithoutLeak, isPersonalDrinkwareOutOfCatalog, isPurePipeLeakDamageTurn, isThinRetrievalQuery, userTurnRelevantToLeakRepairThread, hasObviousLeakOrPipeDamageIntent, isThreadedJointOrLiquidSealingTopic } from "../utils/diagnostic-rules.js";
 import { isProfileOnlyMessage, isThemeOnlyMessage } from "../utils/locale.js";
-import { hasNamedProductCitation } from "../utils/product-mention.js";
+import { mentionsLikelyProductPhrase } from "../utils/product-mention.js";
 import { normalizeText } from "../utils/text.js";
 import { withTimeout } from "../utils/async.js";
 
@@ -175,7 +175,7 @@ export function buildThemeAwareSearchQuery(baseQuestion: string, theme: ProductT
 /** Short or dimension-only follow-ups (e.g. "100mm") must not be the sole vector query — merge recent user turns. */
 
 export function enrichRetrievalQuery(effectiveQuery: string, historyMessages: StoredMessage[], currentMessage: string): string {
-  if (hasNamedProductCitation(currentMessage)) return effectiveQuery.trim();
+  if (mentionsLikelyProductPhrase(currentMessage)) return effectiveQuery.trim();
   if (!isThinRetrievalQuery(effectiveQuery)) return effectiveQuery;
   const userTurns = historyMessages
     .filter((m) => m.role === "user" && !isProfileOnlyMessage(m.content) && !isThemeOnlyMessage(m.content) && m.content.trim().length > 6)
@@ -243,15 +243,34 @@ function getNodeSlug(item: unknown): string {
   return String(metadata.slug ?? "");
 }
 
-/** Merge retrieval pools, keeping supplemental hits first and deduplicating by slug. */
+export function getRetrievalNodeKey(item: unknown): string {
+  const wrap = item as {
+    node?: { metadata?: Record<string, unknown>; text?: string };
+    text?: string;
+  };
+  const meta = wrap.node?.metadata ?? {};
+  if (meta.type === "product_knowledge") {
+    return `pk:${String(meta.slug ?? meta.title ?? "")}`;
+  }
+  const url = String(meta.source_url ?? meta.url ?? "");
+  const sheet = String(meta.sheet_type ?? "");
+  const body =
+    typeof wrap.node?.text === "string"
+      ? wrap.node.text.slice(0, 160)
+      : typeof wrap.text === "string"
+        ? wrap.text.slice(0, 160)
+        : "";
+  return `doc:${String(meta.slug ?? "")}:${sheet}:${url}:${body}`;
+}
+
+/** Merge retrieval pools, keeping supplemental hits first and deduplicating by node identity. */
 export function mergeRetrievalNodes<T>(primary: T[], supplemental: T[]): T[] {
   const seen = new Set<string>();
   const merged: T[] = [];
   for (const node of [...supplemental, ...primary]) {
-    const slug = getNodeSlug(node);
-    const key = slug || String(merged.length);
-    if (slug && seen.has(key)) continue;
-    if (slug) seen.add(key);
+    const key = getRetrievalNodeKey(node);
+    if (seen.has(key)) continue;
+    seen.add(key);
     merged.push(node);
   }
   return merged;
@@ -272,20 +291,62 @@ export function extractSourceUrlsFromNodes(nodes: unknown[]): string[] {
 }
 
 
-export function isTechnicalSheetNode(node: unknown): boolean {
-  const metadata = (node as { node?: { metadata?: Record<string, unknown> } }).node?.metadata ?? {};
+function nodeMetadata(node: unknown): Record<string, unknown> {
+  return (node as { node?: { metadata?: Record<string, unknown> } }).node?.metadata ?? {};
+}
+
+function nodeMarker(metadata: Record<string, unknown>): string {
   const title = String(metadata.title ?? "").toLowerCase();
   const slug = String(metadata.slug ?? "").toLowerCase();
   const sourceUrl = String(metadata.source_url ?? metadata.url ?? "").toLowerCase();
-  const marker = `${title} ${slug} ${sourceUrl}`;
-  const hasTechnicalMarker =
+  const sheetType = String(metadata.sheet_type ?? "").toLowerCase();
+  return `${title} ${slug} ${sourceUrl} ${sheetType}`;
+}
+
+/** FT / TDS chunks (application limits, materials, fluids). */
+export function isTechnicalSheetNode(node: unknown): boolean {
+  const metadata = nodeMetadata(node);
+  const marker = nodeMarker(metadata);
+  const sheetType = String(metadata.sheet_type ?? "").toLowerCase();
+  const sourceUrl = String(metadata.source_url ?? metadata.url ?? "").toLowerCase();
+  const hasFtMarker =
+    sheetType === "ft" ||
     marker.includes("fiche technique") ||
     marker.includes("technical data sheet") ||
     marker.includes("tds") ||
-    marker.includes("ft_");
-  const isPdf = sourceUrl.includes(".pdf");
+    marker.includes("ft_") ||
+    marker.includes("t_fr_") ||
+    marker.includes("t_nl_") ||
+    marker.includes("t_pl_");
+  const isPdf = sourceUrl.includes(".pdf") || String(metadata.type ?? "").toLowerCase() === "pdf";
   const isCatalog = marker.includes("catalogue") || marker.includes("catalog");
-  return isPdf && hasTechnicalMarker && !isCatalog;
+  return isPdf && hasFtMarker && !isCatalog;
+}
+
+/** FDS / SDS chunks (chemical compatibility, hazards). */
+export function isSafetyDataSheetNode(node: unknown): boolean {
+  const metadata = nodeMetadata(node);
+  const marker = nodeMarker(metadata);
+  const sheetType = String(metadata.sheet_type ?? "").toLowerCase();
+  const sourceUrl = String(metadata.source_url ?? metadata.url ?? "").toLowerCase();
+  const hasSdsMarker =
+    sheetType === "fds" ||
+    sheetType === "sds" ||
+    marker.includes("fds") ||
+    marker.includes("sds") ||
+    marker.includes("msds") ||
+    marker.includes("safety data") ||
+    marker.includes("fiche de donnees de securite") ||
+    marker.includes("donnees de securite") ||
+    marker.includes("s_fr_");
+  const isPdf = sourceUrl.includes(".pdf") || String(metadata.type ?? "").toLowerCase() === "pdf";
+  const isCatalog = marker.includes("catalogue") || marker.includes("catalog");
+  return isPdf && hasSdsMarker && !isCatalog;
+}
+
+/** Any indexed FT or FDS PDF chunk (not catalogue PDFs). */
+export function isDocumentSheetNode(node: unknown): boolean {
+  return isTechnicalSheetNode(node) || isSafetyDataSheetNode(node);
 }
 
 
@@ -338,12 +399,84 @@ export function prioritizeTechnicalSheets<T>(nodes: T[]): T[] {
   const catalogNodes = nodes.filter((node) => isProductKnowledgeNode(node));
   const nonCatalogNodes = nodes.filter((node) => !isProductKnowledgeNode(node));
 
-  const technicalNodes = nonCatalogNodes.filter((node) => isTechnicalSheetNode(node));
-  if (technicalNodes.length > 0) return [...catalogNodes, ...technicalNodes];
+  const sheetNodes = nonCatalogNodes.filter((node) => isDocumentSheetNode(node));
+  if (sheetNodes.length > 0) return [...catalogNodes, ...sheetNodes];
   const pdfNonCatalogNodes = nonCatalogNodes.filter((node) => isPdfNode(node) && !isCatalogNode(node));
   if (pdfNonCatalogNodes.length > 0) return [...catalogNodes, ...pdfNonCatalogNodes];
   if (catalogNodes.length > 0) return catalogNodes;
   return [];
+}
+
+function nodeBodyText(item: unknown): string {
+  const wrap = item as { node?: { text?: string }; text?: string };
+  if (typeof wrap.node?.text === "string") return wrap.node.text;
+  if (typeof wrap.text === "string") return wrap.text;
+  return "";
+}
+
+function rankPdfChunk(item: unknown, materialKeyword: string | null | undefined, queryText: string): number {
+  const text = normalizeText(nodeBodyText(item));
+  const meta = nodeMetadata(item);
+  const sheet = String(meta.sheet_type ?? "").toLowerCase();
+  let score = typeof (item as { score?: number }).score === "number" ? (item as { score: number }).score : 0.5;
+  if (sheet === "ft") score += 0.15;
+  if (sheet === "fds" || sheet === "sds") score += 0.1;
+  if (materialKeyword && text.includes(normalizeText(materialKeyword))) score += 0.25;
+  const queryTokens = normalizeText(queryText)
+    .split(/\s+/)
+    .filter((t) => t.length >= 3);
+  const hits = queryTokens.filter((t) => text.includes(t)).length;
+  if (hits > 0) score += 0.04 * Math.min(hits, 6);
+  return score;
+}
+
+/**
+ * Retrieve all indexed FT/FDS PDF chunks for catalogue slugs — used when product_knowledge routing
+ * alone would leave the LLM without raw datasheet text.
+ */
+export async function retrievePdfChunksForSlugs(
+  index: VectorStoreIndex,
+  slugs: string[],
+  locale: string,
+  options?: {
+    materialKeyword?: string | null;
+    queryText?: string;
+  },
+): Promise<unknown[]> {
+  const topK = env.PDF_CHUNKS_PER_SLUG;
+  const queryText = options?.queryText?.trim() || options?.materialKeyword?.trim() || "compatibilite materiau fluide";
+  const uniqueSlugs = [...new Set(slugs.filter(Boolean))].slice(0, env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS);
+  const collected: unknown[] = [];
+
+  for (const slug of uniqueSlugs) {
+    const retriever = index.asRetriever({
+      similarityTopK: topK,
+      filters: {
+        filters: [
+          { key: "locale", value: locale, operator: "==" },
+          { key: "slug", value: slug, operator: "==" },
+        ],
+        condition: "and",
+      },
+    });
+    const raw = await withTimeout(
+      retriever.retrieve(queryText),
+      VECTOR_SEARCH_TIMEOUT_MS,
+      "SUPABASE_VECTOR_SEARCH_SLUG",
+    );
+    if (!Array.isArray(raw) || raw.length === 0) continue;
+
+    const ranked = [...raw]
+      .filter((node) => isDocumentSheetNode(node) || isPdfNode(node))
+      .sort(
+        (a, b) =>
+          rankPdfChunk(b, options?.materialKeyword, queryText) - rankPdfChunk(a, options?.materialKeyword, queryText),
+      );
+
+    collected.push(...ranked);
+  }
+
+  return collected;
 }
 
 

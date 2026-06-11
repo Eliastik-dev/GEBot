@@ -158,6 +158,14 @@ export function removeComplementaryQuestionBlocks(answer: string): string {
 }
 
 
+export function buildPurchaseAvailabilityIntro(locale: Locale, productName: string): string {
+  const name = decodeHtmlEntities(productName).trim();
+  if (locale === "en") return `You can buy **${name}** using the links below.`;
+  if (locale === "nl") return `U kunt **${name}** kopen via de onderstaande links.`;
+  if (locale === "pl") return `Mozesz kupic **${name}** za pomoca ponizszych linkow.`;
+  return `Pour acheter **${name}**, utilisez les liens ci-dessous.`;
+}
+
 export function hasStoreSection(answer: string): boolean {
   const normalized = normalizeText(answer);
   return (

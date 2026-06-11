@@ -16,15 +16,18 @@ import {
 import { catalogAudienceVisibleForSession, inferCatalogProductAudience } from "./product-theme.service.js";
 import { decodeHtmlEntities } from "../utils/text.js";
 import {
+  collectCatalogSearchTerms,
   computeExplicitProductMatchScore,
   EXPLICIT_PRODUCT_MATCH_MIN,
   extractCatalogProductCodes,
   extractCitedProductSearchTerms,
   extractProductSearchTerms,
-  hasNamedProductCitation,
+  sanitizeIlikeSearchTerm,
   isExplicitProductLookupQuery,
+  isFactualProductQuestion,
   matchesCatalogCodeTerm,
   EXPLICIT_PRODUCT_NAME_PRIORITY_MIN,
+  productHasNamePriority,
   productHasStrongExplicitMatch,
   resolveDirectCitedProduct,
   resolveDirectTechnicalSheetProduct,
@@ -83,6 +86,8 @@ const EXPLICIT_CATALOG_PRODUCT_PATTERNS: Array<{ pattern: RegExp; slug: string }
   { pattern: /\b(?:deboucheur|debouch|ontstopper)\s+professionnel\b/i, slug: "ontstopper-professioneel" },
   { pattern: /\budrazniacz\s+uniwersalny\b/i, slug: "udrazniacz-uniwersalny" },
   { pattern: /\b(?:destructeur|destruction)\s+d['']?\s*odeurs?\b/i, slug: "ontstopper-geurverwijderaar" },
+  { pattern: /\b(bande\s+(de\s+)?reparation|bande\s+reparation)\b/i, slug: "bande-de-reparation" },
+  { pattern: /\b(ruban\s+(de\s+)?reparation|ruban\s+reparation)\b/i, slug: "bande-de-reparation" },
 ];
 
 function normalizeText(value: string): string {
@@ -483,10 +488,11 @@ function extractNameSearchTerms(
 }
 
 async function fetchByNameTerms(locale: "fr" | "nl" | "pl", terms: string[]): Promise<ProductKnowledgeRow[]> {
-  if (terms.length === 0) return [];
+  const safeTerms = [...new Set(terms.map((term) => sanitizeIlikeSearchTerm(term)).filter(Boolean))] as string[];
+  if (safeTerms.length === 0) return [];
   const seen = new Map<string, ProductKnowledgeRow>();
 
-  for (const term of terms) {
+  for (const term of safeTerms) {
     const { data, error } = await supabase
       .from("product_knowledge")
       .select("*")
@@ -652,6 +658,13 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
 
   if (scored.length === 0) return [];
 
+  if (isFactualProductQuestion(queryText)) {
+    const factualMatches = scored.filter((item) => item.explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN);
+    if (factualMatches.length > 0) {
+      return factualMatches.slice(0, limit).map((item) => item.product);
+    }
+  }
+
   const strongExplicit = scored.filter((item) => item.explicitScore >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN);
   if (strongExplicit.length > 0) {
     return strongExplicit.slice(0, limit).map((item) => item.product);
@@ -790,37 +803,142 @@ export async function lookupExplicitCatalogProductForSheet(input: {
 
 const CITED_PRODUCT_MATCH_MIN = 35;
 
-/** Fetch catalogue rows when the user cites a product by code/name in conversation (e.g. « que pensez-vous du G110 ? »). */
+export type CatalogCitationResult = {
+  products: ProductKnowledgeRow[];
+  best: ProductKnowledgeRow | null;
+  bestScore: number;
+};
+
+function adjustCitationContextScore(product: ProductKnowledgeRow, text: string, baseScore: number): number {
+  const q = normalizeText(text);
+  const slug = product.slug.toLowerCase();
+  const title = normalizeText(decodeHtmlEntities(product.canonical_name));
+  const piscineContext = /\b(piscine|pool|bassin|liner)\b/.test(q);
+  const plumbingContext = /\b(canalisation|tuyau|tube|pvc|pehd|plomberie|sanitaire|multicouche)\b/.test(q);
+  const rejectsPiscine =
+    /\b(pas\s+(de\s+)?piscine|pas\s+pour\s+la\s+piscine|hors\s+piscine|ne\s+cherche\s+pas)\b/.test(q) &&
+    /\b(piscine|pool)\b/.test(q);
+
+  let score = baseScore;
+
+  if (slug.startsWith("pool-") || title.includes("pool")) {
+    if (!piscineContext || rejectsPiscine) score -= 45;
+    if (plumbingContext && !piscineContext) score -= 35;
+  }
+  if (product.theme === "piscine" && !piscineContext) score -= 30;
+  if (product.theme === "plomberie" && plumbingContext) score += 10;
+
+  if (/\bbande\b/.test(q) && /\breparation\b/.test(q)) {
+    if (slug === "bande-de-reparation" || (slug.includes("bande") && slug.includes("reparation") && !slug.startsWith("pool-"))) {
+      score += 28;
+    }
+    if (slug.startsWith("pool-") && slug.includes("bande")) score -= 20;
+  }
+
+  return score;
+}
+
+/**
+ * Global catalogue citation resolver — fuzzy match against canonical_name/slug
+ * from any user phrasing (no per-product regex whitelist).
+ */
+export async function detectCatalogProductCitations(input: {
+  locale: "fr" | "nl" | "pl";
+  text: string;
+  audience?: Audience | null;
+  limit?: number;
+  minScore?: number;
+}): Promise<CatalogCitationResult> {
+  const texts = [input.text];
+  const minScore = input.minScore ?? CITED_PRODUCT_MATCH_MIN;
+  const terms = collectCatalogSearchTerms(input.text);
+
+  const byExplicit = await fetchExplicitCatalogProducts(input.locale, input.text);
+  const explicitSlugs = new Set(byExplicit.map((p) => p.slug));
+  const byName = terms.length > 0 ? await fetchByNameTerms(input.locale, terms) : [];
+  const byExplicitMention = await fetchByExplicitProductMention(input.locale, texts);
+  const qNorm = normalizeText(input.text);
+  const bandeLookup =
+    /\bbande\b/.test(qNorm) && /\breparation\b/.test(qNorm)
+      ? await fetchByNameTerms(input.locale, [
+          "bande-de-reparation",
+          "bande de reparation",
+          "bande reparation",
+        ])
+      : [];
+
+  const merged = new Map<string, ProductKnowledgeRow>();
+  for (const row of [...byExplicit, ...byExplicitMention, ...byName, ...bandeLookup]) {
+    merged.set(row.slug, row);
+  }
+
+  const codes = extractCatalogProductCodes(input.text);
+  const scored = [...merged.values()]
+    .map((product) => {
+      const rawScore = computeExplicitProductMatchScore(product, texts);
+      const explicitPatternHit = explicitSlugs.has(product.slug);
+      const adjusted = adjustCitationContextScore(
+        product,
+        input.text,
+        rawScore + (explicitPatternHit ? 55 : 0),
+      );
+      return {
+        product,
+        score: adjusted,
+        rawScore,
+        codeHit: codes.some((code) => matchesCatalogCodeTerm(product.slug, product.canonical_name, code)),
+        explicitPatternHit,
+      };
+    })
+    .filter(
+      (item) =>
+        item.score >= minScore ||
+        item.codeHit ||
+        item.explicitPatternHit ||
+        productHasNamePriority(item.product, texts),
+    )
+    .filter(
+      (item) =>
+        !input.audience ||
+        productHasStrongExplicitMatch(item.product, texts) ||
+        item.explicitPatternHit ||
+        catalogAudienceVisibleForSession(
+          input.audience,
+          item.product.canonical_name,
+          item.product.slug,
+          item.product.audience ?? "all",
+        ),
+    )
+    .sort(
+      (a, b) =>
+        Number(b.explicitPatternHit) - Number(a.explicitPatternHit) ||
+        Number(b.codeHit) - Number(a.codeHit) ||
+        b.score - a.score,
+    );
+
+  const products = scored.slice(0, input.limit ?? 3).map((item) => item.product);
+  const best = scored[0];
+  return {
+    products,
+    best: best?.product ?? null,
+    bestScore: best?.score ?? 0,
+  };
+}
+
+/** Fetch catalogue rows when the user cites a product by code/name in conversation. */
 export async function lookupCatalogProductsByCitation(input: {
   locale: "fr" | "nl" | "pl";
   userQuery: string;
   audience?: Audience | null;
   limit?: number;
 }): Promise<ProductKnowledgeRow[]> {
-  if (!hasNamedProductCitation(input.userQuery)) return [];
-
-  const terms = extractCitedProductSearchTerms(input.userQuery);
-  if (terms.length === 0) return [];
-
-  const byName = await fetchByNameTerms(input.locale, terms);
-  const codes = extractCatalogProductCodes(input.userQuery);
-  const candidates = byName.filter(
-    (p) =>
-      !input.audience ||
-      productHasStrongExplicitMatch(p, [input.userQuery]) ||
-      catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
-  );
-
-  const scored = candidates
-    .map((product) => ({
-      product,
-      score: computeExplicitProductMatchScore(product, [input.userQuery]),
-      codeHit: codes.some((code) => matchesCatalogCodeTerm(product.slug, product.canonical_name, code)),
-    }))
-    .filter((item) => item.score >= CITED_PRODUCT_MATCH_MIN || item.codeHit)
-    .sort((a, b) => Number(b.codeHit) - Number(a.codeHit) || b.score - a.score);
-
-  return scored.slice(0, input.limit ?? 2).map((item) => item.product);
+  const detected = await detectCatalogProductCitations({
+    locale: input.locale,
+    text: input.userQuery,
+    ...(input.audience != null ? { audience: input.audience } : {}),
+    limit: input.limit ?? 2,
+  });
+  return detected.products;
 }
 
 /** Deterministic MODE 2 when the user cites a catalogue product by name (any profile/theme). */
@@ -829,7 +947,7 @@ export async function lookupCitedCatalogProductForRecommendation(input: {
   userQuery: string;
   audience?: Audience | null;
 }): Promise<ProductKnowledgeRow | null> {
-  if (!hasNamedProductCitation(input.userQuery) || isExplicitProductLookupQuery(input.userQuery)) return null;
+  if (isExplicitProductLookupQuery(input.userQuery)) return null;
 
   const byExplicitPattern = await fetchExplicitCatalogProducts(input.locale, input.userQuery);
   const fromPattern = resolveDirectCitedProduct(input.userQuery, byExplicitPattern);

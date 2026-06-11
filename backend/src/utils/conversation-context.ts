@@ -3,7 +3,11 @@
  */
 
 import type { StoredMessage } from "../types/index.js";
-import { cleanRecommendedProductLabel, extractRecommendedProduct } from "./amazon.js";
+import {
+  cleanRecommendedProductLabel,
+  extractBoldCatalogProductName,
+  extractRecommendedProduct,
+} from "./amazon.js";
 import { hasOngoingConversation, isInformationalProductQuestion, normalizeText } from "./text.js";
 
 export type ConversationTurn = { role: string; content: string };
@@ -46,15 +50,52 @@ export function feedbackEmbeddingText(row: {
   return uq || sq;
 }
 
-/** Last catalogue product named in an assistant reply this session. */
-export function getLastRecommendedProductFromHistory(messages: StoredMessage[]): string | null {
+/** Last catalogue product named in an assistant reply this session (MODE 2 heading or MODE 1 bold name). */
+export function getLastDiscussedProductFromHistory(messages: StoredMessage[]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const row = messages[i];
     if (row?.role !== "assistant") continue;
-    const product = cleanRecommendedProductLabel(extractRecommendedProduct(row.content));
-    if (product) return product;
+    const fromMode2 = cleanRecommendedProductLabel(extractRecommendedProduct(row.content));
+    if (fromMode2) return fromMode2;
+    const fromBold = cleanRecommendedProductLabel(extractBoldCatalogProductName(row.content));
+    if (fromBold) return fromBold;
+    const fromCtx = row.response_context?.recommended_product?.trim();
+    if (fromCtx) {
+      const cleaned = cleanRecommendedProductLabel(fromCtx);
+      if (cleaned) return cleaned;
+    }
   }
   return null;
+}
+
+/** @deprecated Use getLastDiscussedProductFromHistory — MODE 1 answers also name products in bold. */
+export function getLastRecommendedProductFromHistory(messages: StoredMessage[]): string | null {
+  return getLastDiscussedProductFromHistory(messages);
+}
+
+/** Slug from the last assistant turn that discussed a catalogue product. */
+export function getLastDiscussedProductSlugFromHistory(messages: StoredMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const row = messages[i];
+    if (row?.role !== "assistant") continue;
+    const slugs = row.response_context?.product_slugs;
+    if (Array.isArray(slugs) && slugs.length > 0) {
+      const slug = String(slugs[0] ?? "").trim();
+      if (slug.length > 2) return slug;
+    }
+  }
+  return null;
+}
+
+/** User asks where to buy the product already discussed in this session. */
+export function isPurchaseAvailabilityQuestion(query: string): boolean {
+  const q = normalizeText(query);
+  if (/\b(ou|où)\s+(acheter|trouver|commander|le\s+trouver)\b/.test(q)) return true;
+  if (/\b(acheter|commander)\s+(ce|le|la|du|de\s+la)\s+(produit|meme)\b/.test(q)) return true;
+  if (/\b(disponib|en\s+stock|magasin|amazon|revendeur)\b/.test(q) && /\b(produit|acheter|trouver)\b/.test(q)) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -62,7 +103,9 @@ export function getLastRecommendedProductFromHistory(messages: StoredMessage[]):
  */
 export function isProductFollowUpQuestion(query: string, historyMessages: StoredMessage[]): boolean {
   if (!hasOngoingConversation(historyMessages)) return false;
-  if (!getLastRecommendedProductFromHistory(historyMessages)) return false;
+  if (!getLastDiscussedProductFromHistory(historyMessages)) return false;
+
+  if (isPurchaseAvailabilityQuestion(query)) return true;
 
   if (isInformationalProductQuestion(query)) return true;
 

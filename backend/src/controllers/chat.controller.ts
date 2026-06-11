@@ -14,9 +14,29 @@ import {
 import { resolveFeedbackRetrievalContext } from "../services/feedback-retrieval.service.js";
 import { ensureSession, getSessionTheme, loadRecentMessages, logProblemEvent, logProductAnalytics, logQuery, saveMessage, updateSessionAudience, updateSessionTheme } from "../services/database.service.js";
 import { scheduleJudgeEvaluation, type JudgeInput } from "../services/judge.service.js";
-import { buildSearchQuery, buildThemeAwareSearchQuery, capContextNodes, enrichRetrievalQuery, extractSourceUrlsFromNodes, getCachedResellers, mergeRetrievalNodes, prioritizeTechnicalSheets, summarizeNodeForDebug, AUTOMOTIVE_EXHAUST_SUPPLEMENT_QUERY } from "../services/rag.service.js";
+import {
+  buildSearchQuery,
+  buildThemeAwareSearchQuery,
+  capContextNodes,
+  enrichRetrievalQuery,
+  extractSourceUrlsFromNodes,
+  getCachedResellers,
+  mergeRetrievalNodes,
+  prioritizeTechnicalSheets,
+  retrievePdfChunksForSlugs,
+  summarizeNodeForDebug,
+  AUTOMOTIVE_EXHAUST_SUPPLEMENT_QUERY,
+} from "../services/rag.service.js";
 import { hasDescalingContext, hasHeatingCircuitContext, isBuildingEnvelopeLeakContext, isPersonalDrinkwareOutOfCatalog } from "../utils/diagnostic-rules.js";
-import { countProductKnowledge, lookupCatalogProductsByCitation, lookupCitedCatalogProductForRecommendation, lookupExplicitCatalogProductForSheet, searchProductKnowledge } from "../services/product-knowledge.service.js";
+import {
+  countProductKnowledge,
+  detectCatalogProductCitations,
+  getProductKnowledgeBySlug,
+  lookupCatalogProductsByCitation,
+  lookupCitedCatalogProductForRecommendation,
+  lookupExplicitCatalogProductForSheet,
+  searchProductKnowledge,
+} from "../services/product-knowledge.service.js";
 import { deliverDirectTechnicalSheetTurn } from "../services/direct-sheet.service.js";
 import {
   buildRetrieverNodesFromProductKnowledge,
@@ -29,11 +49,34 @@ import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { fireAndForget, withTimeout } from "../utils/async.js";
 import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection } from "../utils/amazon.js";
 import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, normalizeAudience, normalizeLocale } from "../utils/locale.js";
-import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectCitedProductReply, buildDirectTechnicalSheetReply, buildEscalationSection, buildHandoff, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
-import { getLastRecommendedProductFromHistory, isProductFollowUpQuestion } from "../utils/conversation-context.js";
-import { formatNamedProductCitationPrompt, hasNamedProductCitation, isExplicitProductLookupQuery, resolveDirectCitedProduct, resolveDirectTechnicalSheetProduct } from "../utils/product-mention.js";
+import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectCitedProductReply, buildDirectTechnicalSheetReply, buildEscalationSection, buildHandoff, buildPurchaseAvailabilityIntro, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
+import {
+  getLastDiscussedProductFromHistory,
+  getLastDiscussedProductSlugFromHistory,
+  isProductFollowUpQuestion,
+  isPurchaseAvailabilityQuestion,
+} from "../utils/conversation-context.js";
+import {
+  EXPLICIT_PRODUCT_MATCH_MIN,
+  formatNamedProductCitationPrompt,
+  hasNamedProductCitation,
+  isExplicitProductLookupQuery,
+  isFactualProductQuestion,
+  resolveDirectCitedProduct,
+  resolveDirectTechnicalSheetProduct,
+} from "../utils/product-mention.js";
 import { containsCompetitorBrandMention, sanitizeCompetitorBrandMentions } from "../utils/brand-policy.js";
-import { buildNoContextFallback, extractFluid, getGenericNoAnswerFallback, hasOngoingConversation, isInformationalProductQuestion, resolveClarificationContext, toAudienceLabel, toHistoryPrompt } from "../utils/text.js";
+import {
+  buildNoContextFallback,
+  extractFluid,
+  getGenericNoAnswerFallback,
+  hasOngoingConversation,
+  isCompatibilitySpecQuestion,
+  isInformationalProductQuestion,
+  resolveClarificationContext,
+  toAudienceLabel,
+  toHistoryPrompt,
+} from "../utils/text.js";
 import { resolveJointPasteClarificationContext } from "../utils/joint-paste.js";
 import { safeErrorPayload, isProduction } from "../utils/http.js";
 import { getIncomingSessionId } from "../utils/session.js";
@@ -66,7 +109,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
     const body = req.body as ValidatedChatBody;
     const message = body.message;
     const locale = normalizeLocale(body.locale);
-    const profileFromMetadata = normalizeAudience(body.profile);
+    const profileFromMetadata = normalizeAudience(body.profile ?? undefined);
     const sessionId = getIncomingSessionId(req, body as ChatRequestBody);
     const geoConsentFromBody = body.geoConsent;
     const geoCountryFromBody = body.geoCountry ?? null;
@@ -130,6 +173,78 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           "logQuery.awaiting_profile",
         );
         sseWrite(res, { done: true, sessionId, geoCountry: effectiveGeoCountry }, "done");
+        res.end();
+        return;
+      }
+
+      const sessionDiscussedProduct = getLastDiscussedProductFromHistory(historyMessages);
+      const sessionDiscussedSlug = getLastDiscussedProductSlugFromHistory(historyMessages);
+      const purchaseFollowUp =
+        hasOngoingConversation(historyMessages) &&
+        sessionDiscussedProduct &&
+        isPurchaseAvailabilityQuestion(message);
+
+      if (purchaseFollowUp) {
+        const pkLocalePurchase = productKnowledgeLocale(locale);
+        let purchaseProduct: ProductKnowledgeRow | null = null;
+        if (sessionDiscussedSlug) {
+          purchaseProduct = await getProductKnowledgeBySlug(sessionDiscussedSlug, pkLocalePurchase).catch(() => null);
+        }
+        if (!purchaseProduct) {
+          const cited = await lookupCatalogProductsByCitation({
+            locale: pkLocalePurchase,
+            userQuery: sessionDiscussedProduct!,
+            audience,
+            limit: 1,
+          }).catch(() => []);
+          purchaseProduct = cited[0] ?? null;
+        }
+        const productLabel = purchaseProduct?.canonical_name ?? sessionDiscussedProduct!;
+        const productSlug = purchaseProduct?.slug ?? sessionDiscussedSlug;
+        const recommendation = resolveAmazonRecommendation("", locale, productLabel, productSlug);
+        const resellers = locale === "pl" ? [] : await getCachedResellers().catch(() => []);
+        const resellerSection = locale === "pl" ? "" : buildResellerSection(locale, resellers);
+        const amazonSection = buildAmazonSection(locale, recommendation);
+        const response = [buildPurchaseAvailabilityIntro(locale, productLabel), amazonSection, resellerSection]
+          .filter(Boolean)
+          .join("\n\n");
+        sseWrite(res, { delta: response, sessionId, audience }, "chunk");
+        await saveMessage(sessionId, "assistant", response, {
+          response_context: {
+            recommended_product: productLabel,
+            ...(productSlug ? { product_slugs: [productSlug] } : {}),
+          },
+        });
+        fireAndForget(
+          logQuery({
+            sessionId,
+            locale,
+            audience,
+            fluidType: fluidHint,
+            query: message,
+            responseMs: Date.now() - startedAt,
+            status: "purchase_availability_short",
+          }),
+          "logQuery.purchase_availability_short",
+        );
+        fireAndForget(
+          logProductAnalytics({
+            sessionId,
+            locale,
+            audience,
+            query: message,
+            recommendedProduct: recommendation.productName,
+            amazonUrl: recommendation.amazonUrl,
+            problemType: "purchase",
+            status: "purchase_availability_short",
+          }),
+          "logProductAnalytics.purchase_availability_short",
+        );
+        sseWrite(
+          res,
+          { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry },
+          "done",
+        );
         res.end();
         return;
       }
@@ -282,7 +397,10 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         legacyClarificationContext?.fluid ??
         extractFluid(message);
       const queryForRetrieval = enrichRetrievalQuery(effectiveQuery, historyMessages, message);
-      const expandedRetrievalQuery = await expandRetrievalQueryWithLlm(queryForRetrieval, historyMessages, locale);
+      const expandedRetrievalQuery =
+        purchaseFollowUp || (sessionDiscussedProduct && isProductFollowUpQuestion(message, historyMessages))
+          ? queryForRetrieval.trim()
+          : await expandRetrievalQueryWithLlm(queryForRetrieval, historyMessages, locale);
       if (expandedRetrievalQuery !== queryForRetrieval.trim()) {
         console.log("[/api/chat] retrieval_query_expanded", {
           sessionId,
@@ -300,6 +418,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
 
       // ── ML-based Intent & Metadata Extraction (replaces legacy regex gates) ──
       const preAnalysisTranscript = buildPreAnalysisTranscript(historyMessages, message);
+      const citationScanText = `${preAnalysisTranscript}\n${message}`;
       const diagnosticResult: DiagnosticAnalysis = await runDiagnosticAnalysis(
         preAnalysisTranscript,
         locale,
@@ -400,6 +519,39 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
 
       const pkLocaleEarly = productKnowledgeLocale(locale);
       const catalogSizeEarly = await countProductKnowledge(pkLocaleEarly).catch(() => 0);
+      const catalogCitation =
+        env.PRODUCT_KNOWLEDGE_ENABLED && catalogSizeEarly > 0
+          ? await detectCatalogProductCitations({
+              locale: pkLocaleEarly,
+              text: citationScanText,
+              audience,
+              limit: env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS,
+            }).catch(() => ({ products: [], best: null, bestScore: 0 }))
+          : { products: [], best: null, bestScore: 0 };
+      const hasCatalogCitation = catalogCitation.products.length > 0;
+      const citeNorm = citationScanText
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+      if (
+        hasCatalogCitation &&
+        (isFactualProductQuestion(citationScanText) || catalogCitation.bestScore >= EXPLICIT_PRODUCT_MATCH_MIN)
+      ) {
+        extractedMeta.needs_clarification = false;
+        extractedMeta.missing_params = [];
+        if (isFactualProductQuestion(citationScanText)) extractedMeta.intent = "product_info";
+        if (!extractedMeta.material && /\bpvc\b/.test(citeNorm)) extractedMeta.material = "pvc";
+        if (!extractedMeta.pressure && /\bsous\s+pression\b/.test(citeNorm)) extractedMeta.pressure = "pressurized";
+        if (!extractedMeta.fluid && /\b(canalisation|tuyau|eau|potable)\b/.test(citeNorm)) extractedMeta.fluid = "eau";
+        console.log("[/api/chat] catalog_citation_bypass", {
+          sessionId,
+          slugs: catalogCitation.products.map((p) => p.slug),
+          bestScore: catalogCitation.bestScore,
+          factual: isFactualProductQuestion(citationScanText),
+        });
+      }
+
       const vectorRagLite = resolveVectorRagLite(catalogSizeEarly);
 
       // Build search query enriched with synonyms and technical terms from metadata.
@@ -423,7 +575,11 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
             { lite: vectorRagLite },
           );
 
-      if (extractedMeta.needs_clarification && diagnosticResult.clarification_message) {
+      if (
+        extractedMeta.needs_clarification &&
+        diagnosticResult.clarification_message &&
+        !hasCatalogCitation
+      ) {
         const response = diagnosticResult.clarification_message;
         startSse(res);
         sseWrite(res, { delta: response, sessionId, audience }, "chunk");
@@ -495,14 +651,17 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       if (
         env.PRODUCT_KNOWLEDGE_ENABLED &&
         catalogSizeEarly > 0 &&
-        hasNamedProductCitation(effectiveQuery) &&
-        !isExplicitProductLookupQuery(effectiveQuery)
+        hasCatalogCitation &&
+        !isExplicitProductLookupQuery(effectiveQuery) &&
+        !isFactualProductQuestion(citationScanText)
       ) {
-        const citedProductEarly = await lookupCitedCatalogProductForRecommendation({
-          locale: pkLocaleEarly,
-          userQuery: effectiveQuery,
-          audience,
-        });
+        const citedProductEarly =
+          catalogCitation.best ??
+          (await lookupCitedCatalogProductForRecommendation({
+            locale: pkLocaleEarly,
+            userQuery: citationScanText,
+            audience,
+          }));
         if (citedProductEarly) {
           console.log("[/api/chat] direct_cited_product_early", {
             sessionId,
@@ -576,8 +735,21 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
 
       const history = toHistoryPrompt(historyMessages);
       const ongoingConversation = hasOngoingConversation(historyMessages);
-      const priorRecommendedProduct = getLastRecommendedProductFromHistory(historyMessages);
+      const priorRecommendedProduct = sessionDiscussedProduct;
       const productFollowUp = isProductFollowUpQuestion(message, historyMessages);
+      const compatibilitySpecQuestion = isCompatibilitySpecQuestion(queryForRetrieval);
+      if (
+        productFollowUp ||
+        compatibilitySpecQuestion ||
+        (hasNamedProductCitation(message) && isInformationalProductQuestion(queryForRetrieval))
+      ) {
+        extractedMeta.missing_params = extractedMeta.missing_params.filter(
+          (p) => !["fluid", "diameter", "pressure", "joint_service_fluid"].includes(p),
+        );
+        if (extractedMeta.missing_params.length === 0) {
+          extractedMeta.needs_clarification = false;
+        }
+      }
       const baseFilters = [{ key: "locale", value: locale, operator: "==" as const }];
       const themeFilters = effectiveTheme
         ? [{ key: "theme", value: effectiveTheme, operator: "==" as const }]
@@ -608,9 +780,12 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       let preTechnicalFilterCount = 0;
       let pkRouteTags: string[] = [];
       let pkProductSlugs: string[] = [];
-      let pkResolvedProducts: ProductKnowledgeRow[] = [];
+      let pkResolvedProducts: ProductKnowledgeRow[] = [...catalogCitation.products];
 
-      const feedbackQuery = `${queryForRetrieval}\n${searchQuery}`.trim();
+      const feedbackQuery =
+        productFollowUp || purchaseFollowUp
+          ? message.trim()
+          : `${queryForRetrieval}\n${searchQuery}`.trim();
       const feedbackCtx = await resolveFeedbackRetrievalContext(feedbackQuery, locale, sessionId).catch(
         () => ({
           boostSlugs: [] as string[],
@@ -654,40 +829,60 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         });
       }
 
+      const factualProductMode =
+        isFactualProductQuestion(citationScanText) && catalogCitation.best != null;
+
       if (env.PRODUCT_KNOWLEDGE_ENABLED && catalogSize > 0) {
-        const pkRoute = await routeProductKnowledge({
-          locale,
-          query: retrievalQueryBase,
-          searchQuery,
-          userQuery: effectiveQuery,
-          theme: effectiveTheme,
-          metadata: extractedMeta,
-          limit: env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS,
-          audience,
-          feedbackAdjustments,
-        });
-        pkRouteTags = pkRoute.tags;
-        pkResolvedProducts = pkRoute.products;
-        if (pkRoute.products.length > 0) {
-          pkProductSlugs = pkRoute.products.map((p) => p.slug);
-          resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkRoute.products);
+        if (factualProductMode) {
+          pkResolvedProducts = catalogCitation.best
+            ? [catalogCitation.best]
+            : catalogCitation.products.slice(0, 1);
+          pkProductSlugs = pkResolvedProducts.map((p) => p.slug);
+          resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkResolvedProducts);
           retrievalPath = "product_knowledge";
           retrievalCount = resolvedNodes.length;
           preTechnicalFilterCount = retrievalCount;
-          console.log("[/api/chat] product_knowledge_route", {
+          console.log("[/api/chat] factual_catalog_citation_route", {
             sessionId,
-            catalogSize,
-            retrievalCount,
             slugs: pkProductSlugs,
-            resolvedTags: pkRouteTags,
-            productTags: pkRoute.products.flatMap((p) => p.use_case_tags),
+            best: catalogCitation.best?.canonical_name,
+            bestScore: catalogCitation.bestScore,
           });
-          const debugNodes = pkRoute.products.map((p) => summarizeProductKnowledgeForDebug(p));
-          console.log("[/api/chat] retrieval_debug_product_knowledge", {
-            sessionId,
-            query: searchQuery,
-            debugNodes,
+        } else {
+          const pkRoute = await routeProductKnowledge({
+            locale,
+            query: retrievalQueryBase,
+            searchQuery,
+            userQuery: effectiveQuery,
+            theme: effectiveTheme,
+            metadata: extractedMeta,
+            limit: env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS,
+            audience,
+            feedbackAdjustments,
           });
+          pkRouteTags = pkRoute.tags;
+          pkResolvedProducts = pkRoute.products;
+          if (pkRoute.products.length > 0) {
+            pkProductSlugs = pkRoute.products.map((p) => p.slug);
+            resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkRoute.products);
+            retrievalPath = "product_knowledge";
+            retrievalCount = resolvedNodes.length;
+            preTechnicalFilterCount = retrievalCount;
+            console.log("[/api/chat] product_knowledge_route", {
+              sessionId,
+              catalogSize,
+              retrievalCount,
+              slugs: pkProductSlugs,
+              resolvedTags: pkRouteTags,
+              productTags: pkRoute.products.flatMap((p) => p.use_case_tags),
+            });
+            const debugNodes = pkRoute.products.map((p) => summarizeProductKnowledgeForDebug(p));
+            console.log("[/api/chat] retrieval_debug_product_knowledge", {
+              sessionId,
+              query: searchQuery,
+              debugNodes,
+            });
+          }
         }
       }
 
@@ -802,8 +997,11 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
 
         if (catalogAnchor.length > 0) {
           const catalogNodes = buildRetrieverNodesFromProductKnowledge(catalogAnchor);
-          const maxPdfNodes = Math.max(2, env.DIAGNOSTIC_MAX_CONTEXT_NODES - catalogNodes.length);
-          resolvedNodes = [...catalogNodes, ...capContextNodes(resolvedNodes, maxPdfNodes)];
+          const pdfNodes = resolvedNodes.filter((node) => {
+            const meta = (node as { node?: { metadata?: Record<string, unknown> } }).node?.metadata ?? {};
+            return meta.type !== "product_knowledge";
+          });
+          resolvedNodes = [...catalogNodes, ...pdfNodes];
           retrievalPath = "product_knowledge";
           pkProductSlugs = catalogAnchor.map((p) => p.slug);
           console.log("[/api/chat] catalog_anchor_over_pdf", {
@@ -826,27 +1024,51 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         resolvedNodes = capContextNodes(resolvedNodes, env.DIAGNOSTIC_MAX_CONTEXT_NODES);
         retrievalCount = resolvedNodes.length;
       } else {
-        resolvedNodes = capContextNodes(resolvedNodes, env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS);
         retrievalCount = resolvedNodes.length;
       }
 
-      if (env.PRODUCT_KNOWLEDGE_ENABLED && catalogSize > 0 && hasNamedProductCitation(message)) {
-        const citedProducts = await lookupCatalogProductsByCitation({
-          locale: pkLocale,
-          userQuery: message,
-          audience,
-          limit: 2,
-        });
+      const pdfSupplementSlugs = factualProductMode
+        ? pkProductSlugs.slice(0, 2)
+        : [...new Set([...pkProductSlugs, ...catalogCitation.products.map((p) => p.slug)])].slice(0, 4);
+      if (pdfSupplementSlugs.length > 0) {
+        try {
+          const pdfNodes = await retrievePdfChunksForSlugs(deps.index, pdfSupplementSlugs, pkLocale, {
+            materialKeyword: extractedMeta.material,
+            queryText: factualProductMode ? citationScanText : searchQuery,
+          });
+          if (pdfNodes.length > 0) {
+            resolvedNodes = mergeRetrievalNodes(resolvedNodes, pdfNodes);
+            resolvedNodes = prioritizeTechnicalSheets(resolvedNodes);
+            resolvedNodes = capContextNodes(resolvedNodes, env.DIAGNOSTIC_MAX_CONTEXT_NODES);
+            retrievalCount = resolvedNodes.length;
+            console.log("[/api/chat] catalog_pdf_supplement", {
+              sessionId,
+              slugs: pdfSupplementSlugs,
+              pdfChunks: pdfNodes.length,
+              totalNodes: retrievalCount,
+            });
+          }
+        } catch (err) {
+          console.warn("[/api/chat] catalog_pdf_supplement_failed", { sessionId, err });
+        }
+      }
+
+      if (
+        env.PRODUCT_KNOWLEDGE_ENABLED &&
+        catalogSize > 0 &&
+        hasCatalogCitation &&
+        !factualProductMode
+      ) {
+        const citedProducts = catalogCitation.products;
         if (citedProducts.length > 0) {
           const citedNodes = buildRetrieverNodesFromProductKnowledge(citedProducts);
-          resolvedNodes = mergeRetrievalNodes(resolvedNodes, citedNodes);
+          resolvedNodes = mergeRetrievalNodes(citedNodes, resolvedNodes);
           pkResolvedProducts = [
             ...citedProducts,
             ...pkResolvedProducts.filter((p) => !citedProducts.some((c) => c.slug === p.slug)),
           ];
           pkProductSlugs = [...new Set([...citedProducts.map((p) => p.slug), ...pkProductSlugs])];
           retrievalPath = "product_knowledge";
-          retrievalCount = resolvedNodes.length;
           console.log("[/api/chat] cited_product_injected", {
             sessionId,
             slugs: citedProducts.map((p) => p.slug),
@@ -854,6 +1076,10 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           });
         }
       }
+
+      resolvedNodes = prioritizeTechnicalSheets(resolvedNodes);
+      resolvedNodes = capContextNodes(resolvedNodes, env.DIAGNOSTIC_MAX_CONTEXT_NODES);
+      retrievalCount = resolvedNodes.length;
 
       console.log(`Context found: [${retrievalCount}]`, {
         sessionId,
@@ -935,7 +1161,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       retrieverForAnswer.retrieve = async () => resolvedNodes as Awaited<ReturnType<typeof retrieverForAnswer.retrieve>>;
       const catalogAnchorReminder =
         retrievalPath === "product_knowledge"
-          ? "\nSTRUCTURED_CATALOG_PRIORITY: Les blocs # PRODUIT du catalogue structuré priment sur tout extrait PDF — ancre toutes les specs sur ces blocs.\n"
+          ? "\nSTRUCTURED_CATALOG_PRIORITY: Le catalogue structuré guide le CHOIX du produit. Les extraits FT/FDS PDF sont la source pour compatibilité matériaux/fluides/pressions — en cas d'écart, suivre le PDF.\n"
           : "";
       const fullQuery = `${buildSystemPrompt(
         locale,
@@ -961,9 +1187,10 @@ ${sourceUrls.length > 0 ? sourceUrls.map((url) => `- ${url}`).join("\n") : "- au
 
 QUESTION UTILISATEUR: ${queryForRetrieval}
 ${productFollowUp && priorRecommendedProduct ? `\nTYPE_QUESTION: product_follow_up — MODE 1 OBLIGATOIRE. Produit déjà conseillé : ${priorRecommendedProduct}. Réponds UNIQUEMENT à la nouvelle question en prose courte ; ne répète PAS la fiche produit ni les liens FT/FDS.` : ""}
-${!productFollowUp && !hasNamedProductCitation(message) && isInformationalProductQuestion(queryForRetrieval) ? "\nTYPE_QUESTION: informational_faq — MODE 1: réponds DIRECTEMENT à la question (couleurs, teinte, disponibilité, oui/non…) en prose naturelle avec les faits de la fiche, AVANT toute recommandation produit. MODE 2 seulement si un produit catalogue précis s'impose." : ""}
-${hasNamedProductCitation(message) ? "\nTYPE_QUESTION: cited_product — MODE 2 OBLIGATOIRE sur le produit cité par l'utilisateur (profil et domaine ignorés si la fiche correspond)." : ""}
-${formatNamedProductCitationPrompt(message)}
+${isFactualProductQuestion(citationScanText) && hasCatalogCitation ? "\nTYPE_QUESTION: factual_product — MODE 1: répondez factuellement (oui/non, limites) depuis FT/FDS du produit identifié. Ne pivotez pas vers un autre SKU." : ""}
+${!productFollowUp && !isFactualProductQuestion(citationScanText) && !hasCatalogCitation && isInformationalProductQuestion(queryForRetrieval) ? "\nTYPE_QUESTION: informational_faq — MODE 1: réponds DIRECTEMENT à la question en prose naturelle avec les faits de la fiche." : ""}
+${hasCatalogCitation && !isFactualProductQuestion(citationScanText) ? "\nTYPE_QUESTION: cited_product — MODE 2 sur le produit catalogue identifié (profil/domaine ignorés si la fiche correspond)." : ""}
+${formatNamedProductCitationPrompt(citationScanText, catalogCitation.best?.canonical_name)}
 
 RAPPEL_DIAGNOSTIC: Les extraits peuvent melanger fiches techniques (TDS / limites d'application: pression, fluides, temperatures) et fiches de securite (SDS ou FDS / compatibilite chimique, dangers). Croiser les deux familles de documents uniquement lorsque leurs contenus sont presents dans les extraits ci-dessous.
 
@@ -1168,6 +1395,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
           retrieval_path: retrievalPath,
           product_slugs: pkProductSlugs.length > 0 ? pkProductSlugs : undefined,
           use_case_tags: pkRouteTags.length > 0 ? pkRouteTags : undefined,
+          ...(analyticsProduct ? { recommended_product: analyticsProduct } : {}),
         },
       });
       const problemClassification = await classifyProblemTypeWithLlm(searchQuery, locale);

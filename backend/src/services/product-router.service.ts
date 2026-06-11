@@ -195,13 +195,13 @@ export function formatProductKnowledgeContext(product: ProductKnowledgeRow): str
     : "";
   const advantages = product.advantages.slice(0, 3);
   const warnings = product.warnings.slice(0, 2);
-  const compatibleFluids = product.compatible_fluids.slice(0, 6).join(", ") || "non précisé";
+  const compatibleFluids = product.compatible_fluids.join(", ") || "non précisé";
   const incompatibleFluids =
-    product.incompatible_fluids.length > 0 ? product.incompatible_fluids.slice(0, 4).join(", ") : "";
+    product.incompatible_fluids.length > 0 ? product.incompatible_fluids.join(", ") : "";
   const incompatibleMaterials =
-    product.incompatible_materials.length > 0
-      ? product.incompatible_materials.slice(0, 4).join(", ")
-      : "";
+    product.incompatible_materials.length > 0 ? product.incompatible_materials.join(", ") : "";
+  const compatibleMaterials =
+    product.compatible_materials.length > 0 ? product.compatible_materials.join(", ") : "";
 
   return [
     `# ${product.canonical_name}`,
@@ -210,7 +210,11 @@ export function formatProductKnowledgeContext(product: ProductKnowledgeRow): str
     `Tags: ${product.use_case_tags.slice(0, 8).join(", ") || "non précisé"}`,
     product.summary_technical ?? "Non précisé dans la fiche",
     advantages.length > 0 ? `Avantages: ${advantages.join("; ")}` : "",
-    product.supports ? `Supports: ${product.supports}` : `Supports: ${product.compatible_materials.slice(0, 6).join(", ") || "non précisé"}`,
+    product.supports
+      ? `Supports: ${product.supports}`
+      : compatibleMaterials
+        ? `Supports: ${compatibleMaterials}`
+        : "Supports: non précisé",
     incompatibleMaterials ? `Incompatible: ${incompatibleMaterials}` : "",
     `Fluides OK: ${compatibleFluids}`,
     incompatibleFluids ? `Fluides exclus: ${incompatibleFluids}` : "",

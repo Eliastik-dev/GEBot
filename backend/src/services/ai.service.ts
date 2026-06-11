@@ -126,12 +126,15 @@ EXTRACTED_METADATA (pre-analyzed from user conversation):
   const catalogGuidance =
     retrievalPath === "product_knowledge"
       ? `
-═══ CATALOGUE PRODUITS STRUCTURÉ (source primaire — PRIORITÉ ABSOLUE) ═══
-The context contains pre-verified GEB product records from the official catalog (one block per product).
-- **Structured catalog blocks OVERRIDE any PDF/TDS excerpt** when specs conflict — always trust catalog fields first.
+═══ CATALOGUE PRODUITS STRUCTURÉ (routing + synthèse — pas seul pour la compatibilité) ═══
+The context contains GEB product records from the official catalog (one block per product) plus FT/FDS PDF excerpts when available.
+- Use catalog blocks to **choose** the right product (tags, summary, ligne catalogue).
+- For **compatibility facts** (materials, fluids, pressure, temperature, yes/no on PVC/ABS/metal…): **FT and FDS PDF excerpts are authoritative**. If a catalog field is empty or conflicts with an FT/FDS excerpt, follow the PDF text.
+- Never deny compatibility unless an FT/FDS excerpt or catalog field explicitly excludes the material/fluid.
+- When the user names or targets a **specific catalogue product** (resolved in context): answer **only about that product** for factual/compatibility questions — do NOT pivot to another SKU unless FT/FDS clearly excludes the use case.
+- Open recommendation requests (no named product): choose the best match from retrieved context; ground every claim in FT/FDS excerpts, not assumptions.
 - Recommend EXACTLY ONE primary product using its **canonical name** as shown in the context heading (# PRODUCT NAME).
 - Choose the product whose use_case_tags and technical summary best match the user's stated need — NOT the first block by default.
-- Ground every spec (supports, curing time, temperature, pressure) ONLY in the provided product block.
 - If multiple products could apply, pick the most specific match and briefly mention alternatives in the MODE 2 closing sentence.
 - Do NOT recommend a product absent from the context blocks.${proCatalogHint}${particulierCatalogHint}`
       : "";
@@ -164,7 +167,8 @@ ${productFollowUpBlock}
 ═══ BREVITY (MANDATORY) ═══
 - **MODE 1:** max ~90 words total, 1–2 short paragraphs, at most one clarifying question.
 - **MODE 2:** opening 1 sentence; **Description** max 2 lines; **Utilisation** max 4 short bullets; closing 1 sentence. No extra sections, no lecture, no repeating the user's question.
-- Never list every compatible fluid/material from context — only what matters for this case.
+- For compatibility yes/no questions, state the answer clearly (oui/non) and cite the relevant material/fluid from FT/FDS — do not omit the answer to stay brief.
+- Otherwise never list every compatible fluid/material from context — only what matters for this case.
 - Chain-of-verification is internal reasoning only — do not output verification steps.
 
 ═══ CHAIN OF VERIFICATION (before MODE 2 only — do not print these steps) ═══
@@ -178,6 +182,7 @@ Before recommending ANY product, verify in order:
 - If TDS and SDS conflict or only one is present, say so clearly.
 
 **Step 3 — Missing data gate:** If EXTRACTED_METADATA lists missing_params, stay in MODE 1 and ask only for those items — never guess.
+- **Exception:** compatibility/spec questions (PVC, ABS, support, fluid OK or not) on a named or already recommended product — answer from FT/FDS excerpts in MODE 1 even if fluid/diameter are still "unknown".
 - For leaks: fluid is the main gate; ask pressure only for gas/GPL or explicit pressurized pipe; ask pipe diameter only when missing_params includes "diameter" (rare: structural hole/crack on rigid pipe).
 - Do NOT spontaneously ask for pipe diameter, leak size, or crack length if they are not in missing_params.
 ${geoPolicyBlock}
