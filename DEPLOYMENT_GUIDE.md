@@ -304,6 +304,8 @@ sudo systemctl reload nginx   # if Nginx serves the widget
 | `502 Bad Gateway` from Nginx | `pm2 status` — is `gebot-backend` online? Does `PORT` in `.env` match `__BACKEND_PORT__` in Nginx? |
 | Widget loads but chat fails | Browser devtools → Network → `/api/chat` response; check `pm2 logs gebot-backend` |
 | Fixes on GitHub but not on server | You likely ran `git pull` only — run `./deploy_ubuntu.sh` and check `curl /health` commit hash |
+| Deploy fails: expected commit ≠ `/health` commit | Another process owns `PORT` (often PM2 `backend-api` on 8787). Run `ss -tlnp sport = :8787` — stop the duplicate app or change `PORT` in `.env`, then `pm2 delete gebot-backend && pm2 start ecosystem.config.js` |
+| `gebot-backend` thousands of PM2 restarts | Crash loop — usually `EADDRINUSE` because port 8787 is taken. See row above |
 | `pm2 restart all` used before deploy | Restarts old compiled code without rebuild; use `./deploy_ubuntu.sh` only |
 | Direct `/health` OK but site still wrong | Nginx not reloaded or proxies to another port/app — compare `curl 127.0.0.1:8787/health` vs `curl http://gebot.pn2.geb/health` |
 | `productKnowledgeFr: 0` | Catalog empty on this Supabase project — run `npm run synthesize-products --prefix backend` on the VM |
