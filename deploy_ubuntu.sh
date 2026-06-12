@@ -52,12 +52,17 @@ pm2_app_for_pid() {
   return 1
 }
 
+is_gebot_backend_process() {
+  local cmd="$1"
+  [[ "${cmd}" == *"${SCRIPT_DIR}/backend/dist/server.js"* ]]
+}
+
 warn_port_conflict() {
   local port="$1"
   local owner_pid owner_app owner_cmd
   owner_pid="$(port_listener_pid "${port}")"
   [[ -n "${owner_pid}" ]] || return 0
-  owner_cmd="$(ps -p "${owner_pid}" -o args= 2>/dev/null | head -c 120 || true)"
+  owner_cmd="$(ps -p "${owner_pid}" -o args= 2>/dev/null | head -c 200 || true)"
   owner_app="$(pm2_app_for_pid "${owner_pid}" 2>/dev/null || true)"
   warn "Port ${port} is already bound (PID ${owner_pid}${owner_app:+ — PM2 app '${owner_app}'})."
   [[ -n "${owner_cmd}" ]] && warn "  Process: ${owner_cmd}"
@@ -73,6 +78,33 @@ warn_port_conflict() {
     echo "    pm2 save"
     echo ""
     fail "Resolve the port conflict before redeploying."
+  fi
+}
+
+release_stale_backend_listener() {
+  local port="$1"
+  local owner_pid owner_app owner_cmd gebot_pid
+  owner_pid="$(port_listener_pid "${port}")"
+  [[ -n "${owner_pid}" ]] || return 0
+
+  owner_cmd="$(ps -p "${owner_pid}" -o args= 2>/dev/null || true)"
+  owner_app="$(pm2_app_for_pid "${owner_pid}" 2>/dev/null || true)"
+  gebot_pid="$(pm2 pid "${APP_NAME}" 2>/dev/null || true)"
+
+  # Orphan node process from an old deploy — not tracked by PM2 gebot-backend.
+  if is_gebot_backend_process "${owner_cmd}" && [[ -z "${owner_app}" || "${owner_pid}" != "${gebot_pid}" ]]; then
+    warn "Stopping stale GEBot backend on port ${port} (orphan PID ${owner_pid}, commit likely outdated)."
+    kill "${owner_pid}" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+      [[ -z "$(port_listener_pid "${port}")" ]] && break
+      sleep 1
+    done
+    if [[ -n "$(port_listener_pid "${port}")" ]]; then
+      warn "Orphan still listening — sending SIGKILL to PID ${owner_pid}."
+      kill -9 "${owner_pid}" 2>/dev/null || true
+      sleep 1
+    fi
+    log "Port ${port} released."
   fi
 }
 
@@ -208,6 +240,7 @@ if [[ -n "${RESTART_COUNT}" && "${RESTART_COUNT}" -gt 50 ]]; then
 fi
 
 warn_port_conflict "${BACKEND_PORT}"
+release_stale_backend_listener "${BACKEND_PORT}"
 
 if pm2 describe "${APP_NAME}" >/dev/null 2>&1; then
   log "Recreating PM2 process '${APP_NAME}' (delete + start)..."
@@ -242,8 +275,12 @@ if [[ "${RUNNING_COMMIT}" != "${DEPLOY_COMMIT}" ]]; then
   echo "    pm2 logs ${APP_NAME} --lines 50 --nostream"
   echo "    pm2 describe ${APP_NAME}"
   echo ""
-  echo "  If another PM2 app (e.g. backend-api) owns port ${BACKEND_PORT}:"
-  echo "    pm2 stop backend-api    # only if it is an obsolete duplicate"
+  echo "  If an orphan GEBot node process owns port ${BACKEND_PORT} (not in pm2 status):"
+  echo "    ss -tlnp sport = :${BACKEND_PORT}"
+  echo "    kill <PID>    # then ./deploy_ubuntu.sh again"
+  echo ""
+  echo "  If another PM2 app owns port ${BACKEND_PORT}:"
+  echo "    pm2 stop <app-name>    # only if it is an obsolete duplicate"
   echo "    pm2 delete ${APP_NAME} && pm2 start ecosystem.config.js && pm2 save"
   echo "    curl -s http://127.0.0.1:${BACKEND_PORT}/health"
   echo ""
