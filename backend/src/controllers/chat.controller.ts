@@ -643,6 +643,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
             startedAt,
             resellerPromise: resellerPromiseEarly,
             ongoingConversation: ongoingConversationEarly,
+            sessionTheme: effectiveTheme,
           });
           return;
         }
@@ -687,6 +688,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
             ongoingConversation: ongoingConversationEarly,
             buildReply: buildDirectCitedProductReply,
             logStatus: "direct_cited_product",
+            sessionTheme: effectiveTheme,
           });
           return;
         }
@@ -781,6 +783,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       let pkRouteTags: string[] = [];
       let pkProductSlugs: string[] = [];
       let pkResolvedProducts: ProductKnowledgeRow[] = [...catalogCitation.products];
+      const pkRenderContext = { sessionAudience: audience, sessionTheme: effectiveTheme, locale };
 
       const feedbackQuery =
         productFollowUp || purchaseFollowUp
@@ -838,7 +841,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
             ? [catalogCitation.best]
             : catalogCitation.products.slice(0, 1);
           pkProductSlugs = pkResolvedProducts.map((p) => p.slug);
-          resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkResolvedProducts);
+          resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkResolvedProducts, pkRenderContext);
           retrievalPath = "product_knowledge";
           retrievalCount = resolvedNodes.length;
           preTechnicalFilterCount = retrievalCount;
@@ -864,7 +867,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           pkResolvedProducts = pkRoute.products;
           if (pkRoute.products.length > 0) {
             pkProductSlugs = pkRoute.products.map((p) => p.slug);
-            resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkRoute.products);
+            resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkRoute.products, pkRenderContext);
             retrievalPath = "product_knowledge";
             retrievalCount = resolvedNodes.length;
             preTechnicalFilterCount = retrievalCount;
@@ -996,7 +999,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         }).catch(() => [] as Awaited<ReturnType<typeof searchProductKnowledge>>);
 
         if (catalogAnchor.length > 0) {
-          const catalogNodes = buildRetrieverNodesFromProductKnowledge(catalogAnchor);
+          const catalogNodes = buildRetrieverNodesFromProductKnowledge(catalogAnchor, pkRenderContext);
           const pdfNodes = resolvedNodes.filter((node) => {
             const meta = (node as { node?: { metadata?: Record<string, unknown> } }).node?.metadata ?? {};
             return meta.type !== "product_knowledge";
@@ -1061,7 +1064,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       ) {
         const citedProducts = catalogCitation.products;
         if (citedProducts.length > 0) {
-          const citedNodes = buildRetrieverNodesFromProductKnowledge(citedProducts);
+          const citedNodes = buildRetrieverNodesFromProductKnowledge(citedProducts, pkRenderContext);
           resolvedNodes = mergeRetrievalNodes(citedNodes, resolvedNodes);
           pkResolvedProducts = [
             ...citedProducts,
@@ -1215,7 +1218,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
             })) ?? resolveDirectCitedProduct(effectiveQuery, pkResolvedProducts))
           : null;
       if (directSheetProduct) {
-        answer = buildDirectTechnicalSheetReply(locale, directSheetProduct);
+        answer = buildDirectTechnicalSheetReply(locale, directSheetProduct, pkRenderContext);
         console.log("[/api/chat] direct_technical_sheet", {
           sessionId,
           slug: directSheetProduct.slug,
@@ -1223,7 +1226,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
         });
         sseWrite(res, { delta: answer, sessionId, audience }, "chunk");
       } else if (directCitedProduct) {
-        answer = buildDirectCitedProductReply(locale, directCitedProduct);
+        answer = buildDirectCitedProductReply(locale, directCitedProduct, pkRenderContext);
         console.log("[/api/chat] direct_cited_product", {
           sessionId,
           slug: directCitedProduct.slug,

@@ -20,10 +20,22 @@ export function hasDescalingContext(text: string): boolean {
   return /\b(detartr|descal|calcaire|tartre|detartrans|echangeur\s+(a\s+)?plaque)\b/.test(n);
 }
 
+/** Finition / ravivement esthétique d'un poêle ou foyer — pas entretien circuit chauffage (G3…). */
+export function isWoodStoveCosmeticCareContext(text: string): boolean {
+  const n = normalizeText(text);
+  const appliance = /\b(poele|poeles|cheminee|cheminees|insert|foyer|foyers)\b/.test(n);
+  const cosmetic =
+    /\b(lustr|creme\s+lustrante|raviv|couleur|couleurs|finition|brillant|polir|entretien\s+(esthetique|surface)|aspect\s+metallique)\b/.test(
+      n,
+    );
+  return (appliance && cosmetic) || (/\b(creme\s+lustrante|lustrant)\b/.test(n) && appliance);
+}
+
 /** Entretien circuit chauffage (désembouage, inhibiteur, radiateur…) — pas une pâte à joint filetage. */
 export function hasHeatingCircuitContext(text: string): boolean {
   const n = normalizeText(text);
   if (hasDescalingContext(text)) return false;
+  if (isWoodStoveCosmeticCareContext(text)) return false;
   return (
     /\b(desembou|embouage|inhibiteur|\bg3\b|\bg10\b|\bg70\b|\bg110\b|radiateur|plancher\s+chauffant|plancher\s+chauf|chauffage\s+central|circuit\s+(de\s+)?chauff|circuit\s+ferm|caloporteur|\bglycol\b|neutralisant|nettoyant\s+circuit)\b/.test(
       n,

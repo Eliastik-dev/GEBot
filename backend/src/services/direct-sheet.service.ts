@@ -2,7 +2,7 @@ import type { Response } from "express";
 import type { ExtractedMetadata } from "../intent-extractor.js";
 import { answerCache } from "../config/constants.js";
 import { env } from "../config/env.js";
-import type { Audience, HandoffPayload, Locale, Reseller } from "../types/index.js";
+import type { Audience, HandoffPayload, Locale, ProductTheme, Reseller } from "../types/index.js";
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { fireAndForget } from "../utils/async.js";
 import {
@@ -37,7 +37,12 @@ export type DirectSheetTurnContext = {
   startedAt: number;
   resellerPromise: Promise<Reseller[]>;
   ongoingConversation: boolean;
-  buildReply?: (locale: Locale, product: ProductKnowledgeRow) => string;
+  buildReply?: (
+    locale: Locale,
+    product: ProductKnowledgeRow,
+    ctx?: { sessionAudience?: Audience | null; sessionTheme?: ProductTheme | null },
+  ) => string;
+  sessionTheme?: ProductTheme | null;
   logStatus?: "direct_technical_sheet" | "direct_cited_product";
 };
 
@@ -45,7 +50,10 @@ export type DirectSheetTurnContext = {
 export async function deliverDirectTechnicalSheetTurn(ctx: DirectSheetTurnContext): Promise<void> {
   const buildReply = ctx.buildReply ?? buildDirectTechnicalSheetReply;
   const logStatus = ctx.logStatus ?? "direct_technical_sheet";
-  let answer = buildReply(ctx.locale, ctx.product);
+  let answer = buildReply(ctx.locale, ctx.product, {
+    sessionAudience: ctx.audience,
+    sessionTheme: ctx.sessionTheme ?? null,
+  });
   sseWrite(ctx.res, { delta: answer, sessionId: ctx.sessionId, audience: ctx.audience }, "chunk");
 
   answer = stripLeadingConversationGreeting(answer, ctx.ongoingConversation);

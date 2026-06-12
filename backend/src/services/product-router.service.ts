@@ -6,9 +6,10 @@ import { isAutomotiveExhaustContext } from "../dynamic-reranker.js";
 import {
   isPersonalDrinkwareOutOfCatalog,
   isPiscineInaccessiblePipeLeak,
+  isWoodStoveCosmeticCareContext,
 } from "../utils/diagnostic-rules.js";
 import type { ExtractedMetadata } from "../intent-extractor.js";
-import type { Audience, ProductTheme } from "../types/index.js";
+import type { Audience, Locale, ProductTheme } from "../types/index.js";
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import {
   asksMetalThreadPasteJoint,
@@ -18,7 +19,7 @@ import {
 } from "../utils/joint-paste.js";
 import { searchProductKnowledge } from "./product-knowledge.service.js";
 import type { FeedbackSlugAdjustments } from "./feedback-retrieval.service.js";
-import { inferCatalogProductAudience } from "./product-theme.service.js";
+import { buildCatalogMismatchHints, inferCatalogProductAudience } from "./product-theme.service.js";
 
 export type ProductRouterInput = {
   locale: string;
@@ -66,6 +67,11 @@ export function resolveUseCaseTags(input: ProductRouterInput): string[] {
   if (/\b(kit\s+.*liner|liner.*kit|reparation\s+liner|kit\s+reparation\s+liner)\b/.test(q)) {
     tags.add("piscine");
     tags.add("reparation_fuite");
+    return [...tags];
+  }
+
+  if (isWoodStoveCosmeticCareContext(combinedText)) {
+    tags.add("cheminee");
     return [...tags];
   }
 
@@ -186,7 +192,16 @@ function formatList(items: string[]): string {
   return items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- Non précisé dans la fiche";
 }
 
-export function formatProductKnowledgeContext(product: ProductKnowledgeRow): string {
+export type ProductKnowledgeRenderContext = {
+  sessionAudience?: Audience | null;
+  sessionTheme?: ProductTheme | null;
+  locale?: Locale;
+};
+
+export function formatProductKnowledgeContext(
+  product: ProductKnowledgeRow,
+  renderContext?: ProductKnowledgeRenderContext,
+): string {
   const apps = Array.isArray(product.applications)
     ? product.applications
         .slice(0, 2)
@@ -203,10 +218,26 @@ export function formatProductKnowledgeContext(product: ProductKnowledgeRow): str
   const compatibleMaterials =
     product.compatible_materials.length > 0 ? product.compatible_materials.join(", ") : "";
 
+  const mismatchHints = renderContext
+    ? buildCatalogMismatchHints({
+        sessionAudience: renderContext.sessionAudience,
+        sessionTheme: renderContext.sessionTheme,
+        product: {
+          canonical_name: product.canonical_name,
+          slug: product.slug,
+          audience: product.audience,
+          theme: (product.theme as ProductTheme | null) ?? null,
+        },
+        locale: renderContext.locale,
+      })
+    : [];
+
   return [
     `# ${product.canonical_name}`,
     `Slug: ${product.slug}`,
     `Ligne catalogue: ${inferCatalogProductAudience(product.canonical_name, product.slug, product.audience ?? "all")}`,
+    product.theme ? `Domaine catalogue: ${product.theme}` : "",
+    ...mismatchHints,
     `Tags: ${product.use_case_tags.slice(0, 8).join(", ") || "non précisé"}`,
     product.summary_technical ?? "Non précisé dans la fiche",
     advantages.length > 0 ? `Avantages: ${advantages.join("; ")}` : "",
@@ -229,9 +260,12 @@ export function formatProductKnowledgeContext(product: ProductKnowledgeRow): str
     .join("\n");
 }
 
-export function buildRetrieverNodesFromProductKnowledge(products: ProductKnowledgeRow[]): unknown[] {
+export function buildRetrieverNodesFromProductKnowledge(
+  products: ProductKnowledgeRow[],
+  renderContext?: ProductKnowledgeRenderContext,
+): unknown[] {
   return products.map((product, idx) => {
-    const text = formatProductKnowledgeContext(product);
+    const text = formatProductKnowledgeContext(product, renderContext);
     return {
       score: 1 - idx * 0.02,
       node: {

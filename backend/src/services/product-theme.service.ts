@@ -1,4 +1,4 @@
-import type { Audience, ProductTheme } from "../types/index.js";
+import type { Audience, Locale, ProductTheme } from "../types/index.js";
 
 export type ScrapedProductRow = {
   wp_id: number;
@@ -177,7 +177,7 @@ export function inferCatalogProductAudience(
   return "all";
 }
 
-/** Pro: hide DIY-only rows. Particulier: hide pro-only rows (GEBSOPLAST…). "all" stays visible for both. */
+/** Whether a product ligne matches the session profile (used for ranking + disclaimer hints, not hard exclusion). */
 export function catalogAudienceVisibleForSession(
   sessionAudience: Audience,
   canonicalName: string,
@@ -189,4 +189,193 @@ export function catalogAudienceVisibleForSession(
   if (sessionAudience === "professional") return eff !== "particulier";
   if (sessionAudience === "particulier") return eff !== "professional";
   return true;
+}
+
+export function hasCatalogAudienceMismatch(
+  sessionAudience: Audience | null | undefined,
+  canonicalName: string,
+  slug: string,
+  storedAudience: string,
+): boolean {
+  if (!sessionAudience) return false;
+  return !catalogAudienceVisibleForSession(sessionAudience, canonicalName, slug, storedAudience);
+}
+
+export function hasThemeMismatch(
+  sessionTheme: ProductTheme | null | undefined,
+  productTheme: ProductTheme | null | undefined,
+): boolean {
+  return Boolean(sessionTheme && productTheme && sessionTheme !== productTheme);
+}
+
+const PRODUCT_THEME_LABELS: Record<Locale, Record<ProductTheme, string>> = {
+  fr: {
+    plomberie: "Plomberie / Sanitaire",
+    piscine: "Piscine",
+    chauffage: "Chauffage / Feu",
+    batiment: "Bâtiment",
+    maintenance: "Maintenance",
+    automobile: "Automobile",
+    "eco-conception": "Éco-conception",
+  },
+  en: {
+    plomberie: "Plumbing / Sanitary",
+    piscine: "Pool",
+    chauffage: "Heating / Fire",
+    batiment: "Building",
+    maintenance: "Maintenance",
+    automobile: "Automotive",
+    "eco-conception": "Eco-design",
+  },
+  nl: {
+    plomberie: "Loodgieterij / Sanitair",
+    piscine: "Zwembad",
+    chauffage: "Verwarming / Vuur",
+    batiment: "Bouw",
+    maintenance: "Onderhoud",
+    automobile: "Auto",
+    "eco-conception": "Eco-design",
+  },
+  pl: {
+    plomberie: "Hydraulika / Sanitarne",
+    piscine: "Basen",
+    chauffage: "Ogrzewanie / Ogień",
+    batiment: "Budownictwo",
+    maintenance: "Konserwacja",
+    automobile: "Motoryzacja",
+    "eco-conception": "Eko-projektowanie",
+  },
+};
+
+export function productThemeLabel(theme: ProductTheme, locale: Locale): string {
+  return PRODUCT_THEME_LABELS[locale]?.[theme] ?? PRODUCT_THEME_LABELS.fr[theme];
+}
+
+export function catalogAudienceLabel(line: CatalogAudience, locale: Locale): string {
+  if (line === "professional") {
+    return locale === "en" ? "professional" : locale === "nl" ? "professional" : locale === "pl" ? "profesjonalny" : "professionnel";
+  }
+  if (line === "particulier") {
+    return locale === "en" ? "consumer / DIY" : locale === "nl" ? "particulier" : locale === "pl" ? "konsumencki" : "particulier";
+  }
+  return locale === "en" ? "all profiles" : locale === "nl" ? "alle profielen" : locale === "pl" ? "wszystkie profile" : "tous profils";
+}
+
+export function sessionAudienceLabel(audience: Audience, locale: Locale): string {
+  if (audience === "professional") {
+    return locale === "en" ? "professional" : locale === "nl" ? "professional" : locale === "pl" ? "profesjonalista" : "professionnel";
+  }
+  return locale === "en" ? "consumer" : locale === "nl" ? "particulier" : locale === "pl" ? "konsument" : "particulier";
+}
+
+/** LLM-facing hints when a product is outside the session catalogue line or domain. */
+export function buildCatalogMismatchHints(input: {
+  sessionAudience?: Audience | null;
+  sessionTheme?: ProductTheme | null;
+  product: { canonical_name: string; slug: string; audience?: string | null; theme?: ProductTheme | null };
+  locale?: Locale;
+}): string[] {
+  const locale = input.locale ?? "fr";
+  const hints: string[] = [];
+  const line = inferCatalogProductAudience(
+    input.product.canonical_name,
+    input.product.slug,
+    input.product.audience ?? "all",
+  );
+
+  if (input.sessionAudience && hasCatalogAudienceMismatch(input.sessionAudience, input.product.canonical_name, input.product.slug, input.product.audience ?? "all")) {
+    if (locale === "en") {
+      hints.push(
+        `Catalogue alert: product line is **${catalogAudienceLabel(line, locale)}** while the user session is **${sessionAudienceLabel(input.sessionAudience, locale)}** — if you recommend it, state clearly that it belongs to the other catalogue line.`,
+      );
+    } else if (locale === "nl") {
+      hints.push(
+        `Cataloguswaarschuwing: productlijn **${catalogAudienceLabel(line, locale)}**, sessie **${sessionAudienceLabel(input.sessionAudience, locale)}** — vermeld expliciet de andere cataloguslijn bij aanbeveling.`,
+      );
+    } else if (locale === "pl") {
+      hints.push(
+        `Alert katalogowy: linia produktu **${catalogAudienceLabel(line, locale)}**, sesja **${sessionAudienceLabel(input.sessionAudience, locale)}** — przy rekomendacji wskaż inną linię katalogową.`,
+      );
+    } else {
+      hints.push(
+        `Alerte catalogue : ligne produit **${catalogAudienceLabel(line, locale)}** alors que la session est **${sessionAudienceLabel(input.sessionAudience, locale)}** — si vous le recommandez, précisez clairement qu'il relève de l'autre ligne catalogue.`,
+      );
+    }
+  }
+
+  if (hasThemeMismatch(input.sessionTheme, input.product.theme ?? null)) {
+    const productDomain = productThemeLabel(input.product.theme!, locale);
+    const sessionDomain = productThemeLabel(input.sessionTheme!, locale);
+    if (locale === "en") {
+      hints.push(
+        `Domain alert: product domain is **${productDomain}** while the user selected **${sessionDomain}** — if you recommend it, name the correct domain explicitly.`,
+      );
+    } else if (locale === "nl") {
+      hints.push(
+        `Domeinwaarschuwing: productdomein **${productDomain}**, gekozen domein **${sessionDomain}** — noem het juiste domein bij aanbeveling.`,
+      );
+    } else if (locale === "pl") {
+      hints.push(
+        `Alert domeny: domena produktu **${productDomain}**, wybrana domena **${sessionDomain}** — wskaż właściwą domenę przy rekomendacji.`,
+      );
+    } else {
+      hints.push(
+        `Alerte domaine : domaine produit **${productDomain}** alors que l'utilisateur a choisi **${sessionDomain}** — si vous le recommandez, indiquez explicitement le bon domaine.`,
+      );
+    }
+  }
+
+  return hints;
+}
+
+/** Short disclaimer for deterministic MODE 2 replies (direct sheet / cited product). */
+export function formatUserFacingMismatchNote(input: {
+  sessionAudience?: Audience | null;
+  sessionTheme?: ProductTheme | null;
+  product: { canonical_name: string; slug: string; audience?: string | null; theme?: ProductTheme | null };
+  locale: Locale;
+}): string {
+  const locale = input.locale;
+  const line = inferCatalogProductAudience(
+    input.product.canonical_name,
+    input.product.slug,
+    input.product.audience ?? "all",
+  );
+  const parts: string[] = [];
+
+  if (input.sessionAudience && hasCatalogAudienceMismatch(input.sessionAudience, input.product.canonical_name, input.product.slug, input.product.audience ?? "all")) {
+    if (locale === "en") {
+      parts.push(
+        `Note: this product is from the **${catalogAudienceLabel(line, locale)}** catalogue line, while your session profile is **${sessionAudienceLabel(input.sessionAudience, locale)}**.`,
+      );
+    } else if (locale === "nl") {
+      parts.push(
+        `Let op: dit product hoort bij de cataloguslijn **${catalogAudienceLabel(line, locale)}**, uw sessie is **${sessionAudienceLabel(input.sessionAudience, locale)}**.`,
+      );
+    } else if (locale === "pl") {
+      parts.push(
+        `Uwaga: produkt z linii **${catalogAudienceLabel(line, locale)}**, profil sesji: **${sessionAudienceLabel(input.sessionAudience, locale)}**.`,
+      );
+    } else {
+      parts.push(
+        `Note : ce produit relève du catalogue **${catalogAudienceLabel(line, locale)}**, alors que votre profil indiqué est **${sessionAudienceLabel(input.sessionAudience, locale)}**.`,
+      );
+    }
+  }
+
+  if (hasThemeMismatch(input.sessionTheme, input.product.theme ?? null)) {
+    const productDomain = productThemeLabel(input.product.theme!, locale);
+    const sessionDomain = productThemeLabel(input.sessionTheme!, locale);
+    if (locale === "en") {
+      parts.push(`Note: product domain is **${productDomain}**, not **${sessionDomain}** which you selected.`);
+    } else if (locale === "nl") {
+      parts.push(`Let op: productdomein **${productDomain}**, niet het gekozen domein **${sessionDomain}**.`);
+    } else if (locale === "pl") {
+      parts.push(`Uwaga: domena produktu **${productDomain}**, nie wybrana **${sessionDomain}**.`);
+    } else {
+      parts.push(`Note : ce produit relève du domaine **${productDomain}**, et non du domaine **${sessionDomain}** que vous avez choisi.`);
+    }
+  }
+
+  return parts.join(" ");
 }

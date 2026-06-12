@@ -111,16 +111,13 @@ EXTRACTED_METADATA (pre-analyzed from user conversation):
 - Missing parameters: ${metadata.missing_params.length > 0 ? metadata.missing_params.join(", ") : "none"}`
     : "";
 
-  const proCatalogHint =
-    retrievalPath === "product_knowledge" && audience === "professional"
+  const crossCatalogHint =
+    retrievalPath === "product_knowledge"
       ? `
-- Profile **Professional**: each block shows "Ligne catalogue: professional | particulier | all". For colles / raccords plastiques (PVC, ABS…), **prioritize** products with ligne **professional** when they address the need; do not recommend a ligne **particulier** product if a **professional** alternative in context is a better match.`
-      : "";
-
-  const particulierCatalogHint =
-    retrievalPath === "product_knowledge" && audience === "particulier"
-      ? `
-- Profile **Particulier** (grand public): each block shows "Ligne catalogue: professional | particulier | all". **Prioritize** ligne **particulier** or **all**; **never** recommend ligne **professional** (GEBSOPLAST, décapants chantier, etc.). If the need clearly requires a pro SKU, say so briefly and orient toward **Service Consommateurs** — do not substitute a pro product.`
+- **Règle catalogue & domaine (obligatoire):** chaque bloc indique \`Ligne catalogue\`, \`Domaine catalogue\` et éventuellement une **Alerte catalogue** / **Alerte domaine**.
+- **Priorité:** recommandez d'abord un produit dont la ligne catalogue ET le domaine correspondent au profil et au domaine choisis par l'utilisateur lorsqu'un tel produit répond au besoin dans le contexte.
+- **Repli autorisé:** si aucun produit adapté n'existe dans la bonne ligne ou le bon domaine, vous **pouvez** recommander un produit d'une autre ligne ou d'un autre domaine **uniquement** s'il est présent dans les blocs — mais vous **devez** le stipuler clairement dans l'ouverture ou la phrase de clôture (ex. « Ce produit relève du catalogue particulier, pas professionnel » / « Domaine Chauffage / Feu, pas Plomberie »).
+- Ne refusez pas un SKU pertinent sous prétexte du mauvais profil ou domaine : signalez l'écart, puis recommandez quand même si c'est la meilleure solution GEB disponible.`
       : "";
 
   const catalogGuidance =
@@ -136,7 +133,7 @@ The context contains GEB product records from the official catalog (one block pe
 - Recommend EXACTLY ONE primary product using its **canonical name** as shown in the context heading (# PRODUCT NAME).
 - Choose the product whose use_case_tags and technical summary best match the user's stated need — NOT the first block by default.
 - If multiple products could apply, pick the most specific match and briefly mention alternatives in the MODE 2 closing sentence.
-- Do NOT recommend a product absent from the context blocks.${proCatalogHint}${particulierCatalogHint}`
+- Do NOT recommend a product absent from the context blocks.${crossCatalogHint}`
       : "";
 
   const ongoingBlock = ongoingConversation

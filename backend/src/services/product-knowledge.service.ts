@@ -88,6 +88,11 @@ const EXPLICIT_CATALOG_PRODUCT_PATTERNS: Array<{ pattern: RegExp; slug: string }
   { pattern: /\b(?:destructeur|destruction)\s+d['']?\s*odeurs?\b/i, slug: "ontstopper-geurverwijderaar" },
   { pattern: /\b(bande\s+(de\s+)?reparation|bande\s+reparation)\b/i, slug: "bande-de-reparation" },
   { pattern: /\b(ruban\s+(de\s+)?reparation|ruban\s+reparation)\b/i, slug: "bande-de-reparation" },
+  {
+    pattern:
+      /\b(lustr|creme\s+lustrante|raviv\w*\s+(les\s+)?couleur).*\b(poele|cheminee|insert|foyer)\b|\b(poele|cheminee|insert|foyer).*\b(lustr|raviv\w*\s+(les\s+)?couleur|creme\s+lustrante)\b/i,
+    slug: "creme-lustrante",
+  },
 ];
 
 function normalizeText(value: string): string {
@@ -113,6 +118,7 @@ function scoreProduct(
 ): number {
   let score = 0;
   if (sessionTheme && product.theme === sessionTheme) score += 6;
+  if (sessionTheme && product.theme && product.theme !== sessionTheme) score -= 20;
   const productTags = new Set(product.use_case_tags.map((t) => normalizeText(t)));
   for (const tag of tags) {
     if (productTags.has(normalizeText(tag))) score += 3;
@@ -384,6 +390,18 @@ function scoreProduct(
     if (slug.includes("ms-zinc") || title.includes("ms zinc")) score += 20;
   }
 
+  const woodStoveCosmetic =
+    /\b(poele|cheminee|insert|foyer)\b/.test(q) &&
+    /\b(lustr|raviv|couleur|finition|brillant|creme\s+lustrante|aspect\s+metallique)\b/.test(q);
+  if (woodStoveCosmetic) {
+    if (slug.includes("lustr") || title.includes("lustr")) score += 45;
+    if (slug.includes("propfeu") && title.includes("lustr")) score += 20;
+    if (slug.includes("blackfire") || title.includes("blackfire")) score -= 40;
+    if (title.includes("desembou") || slug.includes("desembou") || slug.includes("g3")) score -= 50;
+    if (title.includes("inhibiteur") || slug.includes("g110") || slug.includes("g10")) score -= 40;
+    if (slug.includes("gebetanche-chauffage") || title.includes("gebetanche chauffage")) score -= 35;
+  }
+
   if (product.extraction_version === "1.0") score += 0.5;
 
   return score;
@@ -408,6 +426,8 @@ const NAME_KEYWORD_PATTERNS: Array<{ pattern: RegExp; term: string }> = [
   { pattern: /\b(colle pvc|gebsoplast)\b/i, term: "gebsoplast" },
   { pattern: /\b(abs|\bpvc\b|pehd|multicouche|polypropylene|\bppr\b)\b/i, term: "gebsoplast" },
   { pattern: /\b(cheminee|refractaire|insert|collafeu)\b/i, term: "refract" },
+  { pattern: /\b(lustr|creme\s+lustrante|raviv.*couleur)\b/i, term: "lustr" },
+  { pattern: /\b(poele|poeles)\b/i, term: "lustr" },
   { pattern: /\b(60\s*(?:min|mn)?\s*chrono|\bchrono\b)/i, term: "chrono" },
   { pattern: /\b(gouttiere|gouttieres|descente\s+pluviale|zinguerie)\b/i, term: "zinc" },
   { pattern: /\bms[\s*-]?zinc\b/i, term: "ms-zinc" },
@@ -571,16 +591,7 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
   const explicitTexts = explicitMatchTexts(input);
 
   const byTags = await fetchCandidates(input.locale, input.theme, tags);
-  const needsThemeFallback =
-    input.theme != null &&
-    byTags.length < PRODUCT_KNOWLEDGE_THEME_FALLBACK_MIN;
-  const byTagsNoTheme = needsThemeFallback
-    ? await fetchCandidates(input.locale, null, tags)
-    : [];
-  const byTagsCrossTheme =
-    needsCrossThemeCatalogSearch(input.theme, queryText) && input.theme
-      ? await fetchCandidates(input.locale, null, tags)
-      : [];
+  const byTagsWithoutTheme = input.theme != null ? await fetchCandidates(input.locale, null, tags) : [];
 
   const nameTerms = extractNameSearchTerms(queryText, tags, input.audience);
   const byName = await fetchByNameTerms(input.locale, nameTerms);
@@ -591,16 +602,13 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
   const byExplicit = await fetchExplicitCatalogProducts(input.locale, queryText);
 
   const merged = new Map<string, ProductKnowledgeRow>();
-  for (const row of [...byExplicit, ...byExplicitMention, ...byTags, ...byTagsNoTheme, ...byTagsCrossTheme, ...byName]) {
+  for (const row of [...byExplicit, ...byExplicitMention, ...byTags, ...byTagsWithoutTheme, ...byName]) {
     merged.set(row.slug, row);
   }
 
-  let candidates = [...merged.values()].filter(
-    (p) =>
-      !input.audience ||
-      productHasStrongExplicitMatch(p, explicitTexts) ||
-      catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
-  );
+  const explicitSlugs = new Set(byExplicit.map((p) => p.slug));
+
+  let candidates = [...merged.values()];
 
   if (candidates.length === 0 && tags.length > 0) {
     const { data, error } = await supabase
@@ -612,17 +620,10 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
       if (error.code === "PGRST205") return [];
       throw error;
     }
-    candidates = ((data as ProductKnowledgeRow[]) ?? []).filter(
-      (p) =>
-        !input.audience ||
-        productHasStrongExplicitMatch(p, explicitTexts) ||
-        catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
-    );
+    candidates = (data as ProductKnowledgeRow[]) ?? [];
   }
 
   if (candidates.length === 0) return [];
-
-  const explicitSlugs = new Set(byExplicit.map((p) => p.slug));
 
   const scored = candidates
     .map((product) => {
@@ -776,11 +777,7 @@ export async function lookupExplicitCatalogProductForSheet(input: {
   const texts = [input.userQuery, input.contextQuery].filter(Boolean) as string[];
 
   const byMention = await fetchByExplicitProductMention(input.locale, texts);
-  const mentionCandidates = byMention.filter(
-    (p) =>
-      !input.audience ||
-      catalogAudienceVisibleForSession(input.audience, p.canonical_name, p.slug, p.audience ?? "all"),
-  );
+  const mentionCandidates = byMention;
   const fromMention = resolveDirectTechnicalSheetProduct(
     input.userQuery,
     input.contextQuery ?? "",
@@ -809,7 +806,13 @@ export type CatalogCitationResult = {
   bestScore: number;
 };
 
-function adjustCitationContextScore(product: ProductKnowledgeRow, text: string, baseScore: number): number {
+function adjustCitationContextScore(
+  product: ProductKnowledgeRow,
+  text: string,
+  baseScore: number,
+  sessionAudience?: Audience | null,
+  sessionTheme?: ProductTheme | null,
+): number {
   const q = normalizeText(text);
   const slug = product.slug.toLowerCase();
   const title = normalizeText(decodeHtmlEntities(product.canonical_name));
@@ -827,6 +830,14 @@ function adjustCitationContextScore(product: ProductKnowledgeRow, text: string, 
   }
   if (product.theme === "piscine" && !piscineContext) score -= 30;
   if (product.theme === "plomberie" && plumbingContext) score += 10;
+  if (sessionTheme && product.theme === sessionTheme) score += 8;
+  if (sessionTheme && product.theme && product.theme !== sessionTheme) score -= 18;
+  if (
+    sessionAudience &&
+    !catalogAudienceVisibleForSession(sessionAudience, product.canonical_name, product.slug, product.audience ?? "all")
+  ) {
+    score -= 20;
+  }
 
   if (/\bbande\b/.test(q) && /\breparation\b/.test(q)) {
     if (slug === "bande-de-reparation" || (slug.includes("bande") && slug.includes("reparation") && !slug.startsWith("pool-"))) {
@@ -881,6 +892,8 @@ export async function detectCatalogProductCitations(input: {
         product,
         input.text,
         rawScore + (explicitPatternHit ? 55 : 0),
+        input.audience,
+        null,
       );
       return {
         product,
@@ -896,18 +909,6 @@ export async function detectCatalogProductCitations(input: {
         item.codeHit ||
         item.explicitPatternHit ||
         productHasNamePriority(item.product, texts),
-    )
-    .filter(
-      (item) =>
-        !input.audience ||
-        productHasStrongExplicitMatch(item.product, texts) ||
-        item.explicitPatternHit ||
-        catalogAudienceVisibleForSession(
-          input.audience,
-          item.product.canonical_name,
-          item.product.slug,
-          item.product.audience ?? "all",
-        ),
     )
     .sort(
       (a, b) =>

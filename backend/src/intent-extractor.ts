@@ -73,6 +73,7 @@ import {
   hasDescalingContext,
   hasHeatingCircuitContext,
   hasObviousLeakOrPipeDamageIntent,
+  isWoodStoveCosmeticCareContext,
   isBuildingEnvelopeLeakContext,
   isPersonalDrinkwareOutOfCatalog,
 } from "./utils/diagnostic-rules.js";
@@ -274,7 +275,7 @@ function regexFallbackExtraction(transcript: string, currentMessage: string): Ex
   let fluid: string | null = null;
   const isAutomotiveExhaust = /\b(echappement|pot[\s-]?d['']?echappement|catalyseur|collecteur|silencieux)\b/.test(fullText);
   // Check heating FIRST (more specific: "chauffage à eau" should be "chauffage", not "eau")
-  if (SAFETY_PATTERNS.fluid_heating.test(fullText)) fluid = "chauffage";
+  if (!isWoodStoveCosmeticCareContext(fullText) && SAFETY_PATTERNS.fluid_heating.test(fullText)) fluid = "chauffage";
   else if (SAFETY_PATTERNS.fluid_gas.test(fullText)) fluid = "gaz";
   else if (SAFETY_PATTERNS.fluid_water.test(fullText) && !isAutomotiveExhaust) fluid = "eau";
   else if (hasLeak && /\b(robinet|mousseur|mitigeur|lavabo|evier|bec|aerateur)\b/.test(fullText)) fluid = "eau";
@@ -522,6 +523,28 @@ const JOINT_AMBIGUOUS_INTENTS: Intent[] = [
   "silicone_application",
 ];
 
+function applyWoodStoveCosmeticSanitizer(merged: ExtractedMetadata): void {
+  const leakLike: Intent[] = ["leak_repair", "pipe_repair", "inaccessible_leak"];
+  if (leakLike.includes(merged.intent)) merged.intent = "product_info";
+  merged.fluid = null;
+  merged.damage_type = null;
+  merged.needs_clarification = false;
+  merged.missing_params = [];
+  const pollutant =
+    /desembou|embouage|inhibiteur|\bg3\b|\bg10\b|\bg70\b|\bg110\b|caloporteur|neutralisant|nettoyant\s+circuit|radiateur|plancher\s+chauffant|circuit\s+chauff|fioul|gebetanche\s+chauffage|chauffage/i;
+  merged.synonyms = merged.synonyms.filter((s) => !pollutant.test(s));
+  merged.synonyms.push(
+    "creme lustrante",
+    "propfeu",
+    "lustrant",
+    "raviver couleur",
+    "poele",
+    "fonte",
+    "haute temperature",
+  );
+  merged.synonyms = [...new Set(merged.synonyms)];
+}
+
 function applyPersonalDrinkwareSanitizer(merged: ExtractedMetadata, conversationText: string): void {
   merged.intent = "general_technical";
   merged.damage_type = null;
@@ -682,12 +705,16 @@ export async function runDiagnosticAnalysis(
 
   const conversationText = `${transcript}\n${currentMessage}`;
   const drinkwareOutOfCatalog = isPersonalDrinkwareOutOfCatalog(conversationText);
+  const woodStoveCosmeticContext =
+    !drinkwareOutOfCatalog && isWoodStoveCosmeticCareContext(conversationText);
   const descalingContext =
     !drinkwareOutOfCatalog &&
+    !woodStoveCosmeticContext &&
     hasDescalingContext(conversationText) &&
     !hasObviousLeakOrPipeDamageIntent(conversationText);
   const heatingCircuitContext =
     !drinkwareOutOfCatalog &&
+    !woodStoveCosmeticContext &&
     !descalingContext &&
     hasHeatingCircuitContext(conversationText) &&
     !hasObviousLeakOrPipeDamageIntent(conversationText);
@@ -696,6 +723,13 @@ export async function runDiagnosticAnalysis(
     const m: ExtractedMetadata = { ...fallback };
     if (drinkwareOutOfCatalog) {
       applyPersonalDrinkwareSanitizer(m, conversationText);
+      return {
+        metadata: m,
+        clarification_message: null,
+      };
+    }
+    if (woodStoveCosmeticContext) {
+      applyWoodStoveCosmeticSanitizer(m);
       return {
         metadata: m,
         clarification_message: null,
@@ -749,7 +783,7 @@ export async function runDiagnosticAnalysis(
     chauffage: ["eau"],   // "chauffage" is more specific than "eau"
     huile: ["eau"],       // "huile" is more specific than "eau"
   };
-  if (fallback.fluid && fallback.fluid !== merged.fluid) {
+  if (!woodStoveCosmeticContext && fallback.fluid && fallback.fluid !== merged.fluid) {
     const overrides = FLUID_SPECIFICITY[fallback.fluid];
     if (overrides && (!merged.fluid || overrides.includes(merged.fluid))) {
       merged.fluid = fallback.fluid;
@@ -796,6 +830,8 @@ export async function runDiagnosticAnalysis(
 
   if (drinkwareOutOfCatalog) {
     applyPersonalDrinkwareSanitizer(merged, conversationText);
+  } else if (woodStoveCosmeticContext) {
+    applyWoodStoveCosmeticSanitizer(merged);
   } else if (descalingContext) {
     applyDescalingSanitizer(merged, conversationText);
   } else if (heatingCircuitContext) {

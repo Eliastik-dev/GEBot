@@ -1,6 +1,7 @@
 import { COMPLEMENTARY_HINTS } from "../config/constants.js";
-import type { Audience, HandoffPayload, Locale, Reseller } from "../types/index.js";
+import type { Audience, HandoffPayload, Locale, ProductTheme, Reseller } from "../types/index.js";
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
+import { formatUserFacingMismatchNote } from "../services/product-theme.service.js";
 import { removeAmazonSections } from "./amazon.js";
 import { detectTheme } from "./locale.js";
 import { decodeHtmlEntities, normalizeText } from "./text.js";
@@ -275,8 +276,28 @@ export function isResellerIntent(message: string): boolean {
   );
 }
 
+type DirectProductReplyContext = {
+  sessionAudience?: Audience | null;
+  sessionTheme?: ProductTheme | null;
+};
+
+function directProductMismatchNote(locale: Locale, product: ProductKnowledgeRow, ctx?: DirectProductReplyContext): string {
+  if (!ctx?.sessionAudience && !ctx?.sessionTheme) return "";
+  const note = formatUserFacingMismatchNote({
+    sessionAudience: ctx.sessionAudience,
+    sessionTheme: ctx.sessionTheme,
+    product,
+    locale,
+  });
+  return note ? `\n\n${note}` : "";
+}
+
 /** Deterministic MODE 2 answer when a technical sheet was explicitly requested and matched in catalogue. */
-export function buildDirectTechnicalSheetReply(locale: Locale, product: ProductKnowledgeRow): string {
+export function buildDirectTechnicalSheetReply(
+  locale: Locale,
+  product: ProductKnowledgeRow,
+  ctx?: DirectProductReplyContext,
+): string {
   const name = decodeHtmlEntities(product.canonical_name).trim();
   const summary =
     product.summary_technical?.trim() ||
@@ -298,8 +319,10 @@ export function buildDirectTechnicalSheetReply(locale: Locale, product: ProductK
       ? "- SDS: Not specified in the catalogue record"
       : "- FDS : Non précisé dans la fiche";
 
+  const mismatch = directProductMismatchNote(locale, product, ctx);
+
   if (locale === "en") {
-    return `Here is the technical sheet for **${name}**.
+    return `Here is the technical sheet for **${name}**.${mismatch}
 
 ### 📦 Recommended Product: **${name}**
 - **Description:** ${summary}
@@ -309,7 +332,7 @@ ${ftLine}
 ${fdsLine}`;
   }
   if (locale === "nl") {
-    return `Hier is de technische fiche van **${name}**.
+    return `Hier is de technische fiche van **${name}**.${mismatch}
 
 ### 📦 Aanbevolen product: **${name}**
 - **Beschrijving:** ${summary}
@@ -319,7 +342,7 @@ ${ftLine}
 ${fdsLine}`;
   }
   if (locale === "pl") {
-    return `Oto karta techniczna produktu **${name}**.
+    return `Oto karta techniczna produktu **${name}**.${mismatch}
 
 ### 📦 Rekomendowany produkt: **${name}**
 - **Opis:** ${summary}
@@ -329,7 +352,7 @@ ${ftLine}
 ${fdsLine}`;
   }
 
-  return `Voici la fiche technique du **${name}**.
+  return `Voici la fiche technique du **${name}**.${mismatch}
 
 ### 📦 Produit Recommandé : **${name}**
 - **Description :** ${summary}
@@ -361,13 +384,19 @@ function documentationLines(locale: Locale, product: ProductKnowledgeRow): { ftL
 }
 
 /** Deterministic MODE 2 when the user cites a catalogue product by name. */
-export function buildDirectCitedProductReply(locale: Locale, product: ProductKnowledgeRow): string {
+export function buildDirectCitedProductReply(
+  locale: Locale,
+  product: ProductKnowledgeRow,
+  ctx?: DirectProductReplyContext,
+): string {
   const name = decodeHtmlEntities(product.canonical_name).trim();
   const summary = product.summary_technical?.trim() || catalogSummaryFallback(locale);
   const { ftLine, fdsLine } = documentationLines(locale, product);
 
+  const mismatch = directProductMismatchNote(locale, product, ctx);
+
   if (locale === "en") {
-    return `Yes — **${name}** is in the GEB catalogue.
+    return `Yes — **${name}** is in the GEB catalogue.${mismatch}
 
 ### 📦 Recommended Product: **${name}**
 - **Description:** ${summary}
@@ -377,7 +406,7 @@ ${ftLine}
 ${fdsLine}`;
   }
   if (locale === "nl") {
-    return `Ja — **${name}** staat in de GEB-catalogus.
+    return `Ja — **${name}** staat in de GEB-catalogus.${mismatch}
 
 ### 📦 Aanbevolen product: **${name}**
 - **Beschrijving:** ${summary}
@@ -387,7 +416,7 @@ ${ftLine}
 ${fdsLine}`;
   }
   if (locale === "pl") {
-    return `Tak — **${name}** jest w katalogu GEB.
+    return `Tak — **${name}** jest w katalogu GEB.${mismatch}
 
 ### 📦 Rekomendowany produkt: **${name}**
 - **Opis:** ${summary}
@@ -397,7 +426,7 @@ ${ftLine}
 ${fdsLine}`;
   }
 
-  return `Oui — **${name}** fait partie du catalogue GEB.
+  return `Oui — **${name}** fait partie du catalogue GEB.${mismatch}
 
 ### 📦 Produit Recommandé : **${name}**
 - **Description :** ${summary}

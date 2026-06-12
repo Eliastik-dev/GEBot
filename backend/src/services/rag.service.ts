@@ -83,6 +83,10 @@ export function buildSearchQuery(baseQuestion: string, fluid: string | null): st
 const THEME_SEARCH_EXPANSIONS: Record<ProductTheme, Array<{ pattern: RegExp; terms: string[] }>> = {
   chauffage: [
     {
+      pattern: /\b(poele|cheminee|insert|foyer|lustr|raviv|couleur|finition|fonte)\b/i,
+      terms: ["creme lustrante", "propfeu", "lustrant", "raviver couleur", "entretien poele"],
+    },
+    {
       pattern: /\b(porte|insert|cordon|tresse|corde|joint.*cheminee|cheminee.*joint|etanche.*insert|insert.*etanche)\b/i,
       terms: ["tresse", "collafeu", "colle refractaire", "joint porte insert", "cordon etancheite", "fibre ceramique", "kit tresse"],
     },
