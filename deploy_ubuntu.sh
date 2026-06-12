@@ -155,8 +155,9 @@ if [[ ! -d ".git" ]]; then
 fi
 
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-log "Pulling latest code (origin/${CURRENT_BRANCH})..."
-git pull origin "${CURRENT_BRANCH}"
+log "Syncing code to origin/${CURRENT_BRANCH} (fetch + reset — avoids chmod/local drift)..."
+git fetch origin "${CURRENT_BRANCH}"
+git reset --hard "origin/${CURRENT_BRANCH}"
 
 # ---------------------------------------------------------------------------
 # 3. Install Node.js v20 if missing
