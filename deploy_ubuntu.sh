@@ -147,11 +147,11 @@ if [[ ! -f "backend/dist/server.js" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 8. Start or reload PM2 process
+# 8. Start or restart PM2 process (hard restart — reload can keep old dist/)
 # ---------------------------------------------------------------------------
 if pm2 describe "${APP_NAME}" >/dev/null 2>&1; then
-  log "Reloading PM2 process '${APP_NAME}' (zero-downtime)..."
-  pm2 reload ecosystem.config.js
+  log "Restarting PM2 process '${APP_NAME}' with fresh build (update-env)..."
+  pm2 restart ecosystem.config.js --update-env
 else
   log "Starting PM2 process '${APP_NAME}'..."
   pm2 start ecosystem.config.js
@@ -159,6 +159,34 @@ fi
 
 pm2 save
 log "PM2 process list saved."
+
+BACKEND_PORT="$(grep -E '^PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+BACKEND_PORT="${BACKEND_PORT:-8787}"
+log "Waiting for backend to accept connections on port ${BACKEND_PORT}..."
+sleep 3
+HEALTH_JSON="$(curl -sf --max-time 10 "http://127.0.0.1:${BACKEND_PORT}/health" 2>/dev/null || true)"
+if [[ -z "${HEALTH_JSON}" ]]; then
+  fail "Backend /health unreachable after PM2 restart — check: pm2 logs ${APP_NAME}"
+fi
+RUNNING_COMMIT="$(echo "${HEALTH_JSON}" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p' | head -1)"
+if [[ "${RUNNING_COMMIT}" != "${DEPLOY_COMMIT}" ]]; then
+  echo ""
+  echo -e "${RED}╔══════════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${RED}║  DEPLOY FAILED — PM2 is still running OLD backend code           ║${NC}"
+  echo -e "${RED}╚══════════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo "  Expected commit (git/build):  ${DEPLOY_COMMIT}"
+  echo "  Running commit (/health):     ${RUNNING_COMMIT:-<missing>}"
+  echo ""
+  echo "  Fix manually on the server:"
+  echo "    pm2 delete ${APP_NAME}"
+  echo "    pm2 start ecosystem.config.js"
+  echo "    pm2 save"
+  echo "    curl -s http://127.0.0.1:${BACKEND_PORT}/health"
+  echo ""
+  fail "Health commit mismatch — bot answers will NOT match the new code until PM2 is fixed."
+fi
+log "Health check OK — running commit ${RUNNING_COMMIT} matches build ${DEPLOY_COMMIT}"
 
 # ---------------------------------------------------------------------------
 # 9. Generate Nginx configuration (placeholders replaced)

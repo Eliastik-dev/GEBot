@@ -89,9 +89,11 @@ PK_FR="$(parse_field "${LOCAL_JSON}" ".productKnowledgeFr")"
 CATALOG_READY="$(parse_field "${LOCAL_JSON}" ".catalogReady")"
 RETRIEVAL_VER="$(parse_field "${LOCAL_JSON}" ".retrieval.version")"
 G110_LOOKUP="$(parse_field "${LOCAL_JSON}" ".retrieval.g110SheetLookup")"
+CREME_LUSTRANTE="$(parse_field "${LOCAL_JSON}" ".retrieval.cremeLustranteInCatalog")"
+POELE_SLUG="$(parse_field "${LOCAL_JSON}" ".retrieval.poeleOpenRecommendationSlug")"
 
 if [[ "${HEALTH_COMMIT}" != "${GIT_COMMIT}" ]]; then
-  warn "Health commit (${HEALTH_COMMIT}) != git HEAD (${GIT_COMMIT}) — run ./deploy_ubuntu.sh (not just git pull / pm2 restart)"
+  fail "Health commit (${HEALTH_COMMIT}) != git HEAD (${GIT_COMMIT}) — PM2 still runs old dist/. Fix: pm2 delete gebot-backend && pm2 start ecosystem.config.js && pm2 save"
 else
   ok "Commit matches git HEAD (${GIT_COMMIT})"
 fi
@@ -106,10 +108,23 @@ if [[ "${CATALOG_READY}" != "true" ]]; then
   warn "catalogReady is not true — check PRODUCT_KNOWLEDGE_ENABLED in ${ENV_FILE}"
 fi
 
-if [[ -n "${RETRIEVAL_VER}" && "${RETRIEVAL_VER}" != "2026-06-08-direct-sheet-citation" ]]; then
-  warn "retrieval.version=${RETRIEVAL_VER} — expected 2026-06-08-direct-sheet-citation (old build still running?)"
-elif [[ -n "${RETRIEVAL_VER}" ]]; then
+EXPECTED_RETRIEVAL_VER="2026-06-12-cross-catalog-poele-accent"
+if [[ -n "${RETRIEVAL_VER}" && "${RETRIEVAL_VER}" != "${EXPECTED_RETRIEVAL_VER}" ]]; then
+  fail "retrieval.version=${RETRIEVAL_VER} — expected ${EXPECTED_RETRIEVAL_VER} (PM2 still on old build)"
+else
   ok "retrieval.version=${RETRIEVAL_VER}"
+fi
+
+if [[ "${CREME_LUSTRANTE}" == "true" ]]; then
+  ok "cremeLustranteInCatalog=true"
+else
+  fail "cremeLustranteInCatalog=${CREME_LUSTRANTE:-missing} — run: npm run synthesize-products --prefix backend"
+fi
+
+if [[ "${POELE_SLUG}" == "creme-lustrante" ]]; then
+  ok "poeleOpenRecommendationSlug=creme-lustrante"
+else
+  fail "poeleOpenRecommendationSlug=${POELE_SLUG:-missing} — poêle routing broken on this build"
 fi
 
 if [[ "${G110_LOOKUP}" == "g110-inhibiteur-universel" ]]; then

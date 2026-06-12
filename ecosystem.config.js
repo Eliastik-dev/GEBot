@@ -61,6 +61,28 @@ if (fs.existsSync(backendEnvPath) && !fs.existsSync(rootEnvPath)) {
 
 const envFromFile = parseEnvFile(envFile);
 
+function readBuildInfoStamp() {
+  const candidates = [
+    path.join(projectRoot, "backend", "dist", "build-info.json"),
+    path.join(projectRoot, "backend", "dist", "build-info.json"),
+  ];
+  if (cwd === path.join(projectRoot, "backend")) {
+    candidates.unshift(path.join(cwd, "dist", "build-info.json"));
+  }
+  for (const infoPath of candidates) {
+    try {
+      if (fs.existsSync(infoPath)) {
+        return JSON.parse(fs.readFileSync(infoPath, "utf8"));
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return {};
+}
+
+const buildStamp = readBuildInfoStamp();
+
 module.exports = {
   apps: [
     {
@@ -70,6 +92,8 @@ module.exports = {
       node_args: "--enable-source-maps",
       env: {
         NODE_ENV: "production",
+        DEPLOY_COMMIT: buildStamp.commit ?? "",
+        DEPLOY_BUILT_AT: buildStamp.builtAt ?? "",
         ...envFromFile,
       },
       instances: 1,
