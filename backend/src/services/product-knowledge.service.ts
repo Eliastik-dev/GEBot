@@ -545,8 +545,9 @@ async function fetchExplicitCatalogProducts(
   combinedText: string,
 ): Promise<ProductKnowledgeRow[]> {
   const rows: ProductKnowledgeRow[] = [];
+  const normalizedText = normalizeText(combinedText);
   for (const { pattern, slug } of EXPLICIT_CATALOG_PRODUCT_PATTERNS) {
-    if (!pattern.test(combinedText)) continue;
+    if (!pattern.test(normalizedText)) continue;
     const row = await getProductKnowledgeBySlug(slug, locale);
     if (row) rows.push(row);
   }
@@ -951,6 +952,7 @@ export async function lookupCitedCatalogProductForRecommendation(input: {
   if (isExplicitProductLookupQuery(input.userQuery)) return null;
 
   const byExplicitPattern = await fetchExplicitCatalogProducts(input.locale, input.userQuery);
+  if (byExplicitPattern.length > 0) return byExplicitPattern[0] ?? null;
   const fromPattern = resolveDirectCitedProduct(input.userQuery, byExplicitPattern);
   if (fromPattern) return fromPattern;
 

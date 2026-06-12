@@ -16,12 +16,13 @@ import { chatBodySchema, feedbackBodySchema, geolocationQuerySchema } from "../v
 import {
   countProductKnowledge,
   getProductKnowledgeBySlug,
+  lookupCitedCatalogProductForRecommendation,
   lookupExplicitCatalogProductForSheet,
 } from "../services/product-knowledge.service.js";
 import { productKnowledgeLocale } from "../services/product-router.service.js";
 
 /** Bump when retrieval behaviour changes — compare with /health on the VM after deploy. */
-export const RETRIEVAL_FEATURES_VERSION = "2026-06-08-direct-sheet-citation";
+export const RETRIEVAL_FEATURES_VERSION = "2026-06-12-cross-catalog-poele-accent";
 
 export function registerRoutes(app: Express, chatDeps: ChatDeps): void {
   app.get(
@@ -46,6 +47,8 @@ export function registerRoutes(app: Express, chatDeps: ChatDeps): void {
     let productKnowledgeFr: number | null = null;
     let g110InCatalog = false;
     let g110SheetLookup: string | null = null;
+    let cremeLustranteInCatalog = false;
+    let poeleOpenRecommendationSlug: string | null = null;
     try {
       const { error } = await supabase.from("chat_sessions").select("session_id").limit(1);
       supabaseOk = !error;
@@ -61,6 +64,14 @@ export function registerRoutes(app: Express, chatDeps: ChatDeps): void {
             audience: "professional",
           });
           g110SheetLookup = sheetHit?.slug ?? null;
+          const creme = await getProductKnowledgeBySlug("creme-lustrante", pkLocale);
+          cremeLustranteInCatalog = Boolean(creme);
+          const poeleHit = await lookupCitedCatalogProductForRecommendation({
+            locale: pkLocale,
+            userQuery: "quel produit pour lustrer et raviver les couleurs d'un poêle à bois",
+            audience: "particulier",
+          });
+          poeleOpenRecommendationSlug = poeleHit?.slug ?? null;
         }
       }
     } catch {
@@ -85,6 +96,8 @@ export function registerRoutes(app: Express, chatDeps: ChatDeps): void {
         version: RETRIEVAL_FEATURES_VERSION,
         g110InCatalog,
         g110SheetLookup,
+        cremeLustranteInCatalog,
+        poeleOpenRecommendationSlug,
       },
     });
   });

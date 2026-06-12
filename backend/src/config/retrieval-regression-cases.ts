@@ -197,6 +197,16 @@ export const RETRIEVAL_REGRESSION_CASES: RetrievalRegressionCase[] = [
     intent: "general_technical",
   },
   {
+    id: "chauffage-poele-creme-lustrante-accent",
+    locale: "fr",
+    theme: "chauffage",
+    audience: "particulier",
+    query: "quel produit pour lustrer et raviver les couleurs d'un poêle à bois",
+    expectedSlugs: ["creme-lustrante"],
+    forbiddenSlugs: ["desembou", "gebetanche-chauffage", "g110-inhibiteur"],
+    intent: "general_technical",
+  },
+  {
     id: "chauffage-fiche-technique-g30-desembouant",
     locale: "fr",
     theme: "chauffage",

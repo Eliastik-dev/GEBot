@@ -652,15 +652,14 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       if (
         env.PRODUCT_KNOWLEDGE_ENABLED &&
         catalogSizeEarly > 0 &&
-        hasCatalogCitation &&
         !isExplicitProductLookupQuery(effectiveQuery) &&
         !isFactualProductQuestion(citationScanText)
       ) {
         const citedProductEarly =
-          catalogCitation.best ??
+          (hasCatalogCitation ? catalogCitation.best : null) ??
           (await lookupCitedCatalogProductForRecommendation({
             locale: pkLocaleEarly,
-            userQuery: citationScanText,
+            userQuery: queryForRetrieval,
             audience,
           }));
         if (citedProductEarly) {
@@ -1207,16 +1206,19 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
           audience,
         })) ??
         resolveDirectTechnicalSheetProduct(effectiveQuery, queryForRetrieval, pkResolvedProducts);
-      const directCitedProduct =
-        !directSheetProduct &&
-        hasNamedProductCitation(effectiveQuery) &&
-        !isExplicitProductLookupQuery(effectiveQuery)
-          ? ((await lookupCitedCatalogProductForRecommendation({
+      const citedRecommendation =
+        !directSheetProduct && !isExplicitProductLookupQuery(effectiveQuery)
+          ? await lookupCitedCatalogProductForRecommendation({
               locale: pkLocale,
-              userQuery: effectiveQuery,
+              userQuery: queryForRetrieval,
               audience,
-            })) ?? resolveDirectCitedProduct(effectiveQuery, pkResolvedProducts))
+            })
           : null;
+      const directCitedProduct =
+        citedRecommendation ??
+        (hasNamedProductCitation(effectiveQuery)
+          ? resolveDirectCitedProduct(effectiveQuery, pkResolvedProducts)
+          : null);
       if (directSheetProduct) {
         answer = buildDirectTechnicalSheetReply(locale, directSheetProduct, pkRenderContext);
         console.log("[/api/chat] direct_technical_sheet", {
