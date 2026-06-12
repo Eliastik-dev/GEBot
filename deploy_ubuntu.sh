@@ -196,9 +196,20 @@ if [[ ! -d ".git" ]]; then
 fi
 
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-log "Syncing code to origin/${CURRENT_BRANCH} (fetch + reset — avoids chmod/local drift)..."
-git fetch origin "${CURRENT_BRANCH}"
-git reset --hard "origin/${CURRENT_BRANCH}"
+if [[ -z "${GEBOT_DEPLOY_SYNCED:-}" ]]; then
+  DEPLOY_START_HEAD="$(git rev-parse HEAD)"
+  log "Syncing code to origin/${CURRENT_BRANCH} (fetch + reset — avoids chmod/local drift)..."
+  git fetch origin "${CURRENT_BRANCH}"
+  git reset --hard "origin/${CURRENT_BRANCH}"
+  DEPLOY_END_HEAD="$(git rev-parse HEAD)"
+  if [[ "${DEPLOY_START_HEAD}" != "${DEPLOY_END_HEAD}" ]]; then
+    log "Code updated (${DEPLOY_START_HEAD:0:7} → ${DEPLOY_END_HEAD:0:7}) — re-running deploy with latest script..."
+    export GEBOT_DEPLOY_SYNCED=1
+    exec bash "${SCRIPT_DIR}/deploy_ubuntu.sh" "$@"
+  fi
+else
+  log "Deploying synced commit $(git rev-parse --short HEAD)..."
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Install Node.js v20 if missing
