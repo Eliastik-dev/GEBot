@@ -37,7 +37,11 @@ GEBOT_SERVER_NAME="${GEBOT_SERVER_NAME:-gebot.pn2.geb}"
 GEBOT_NGINX_PORT="$(read_env_var GEBOT_NGINX_PORT)"
 GEBOT_NGINX_PORT="${GEBOT_NGINX_PORT:-80}"
 
+HEALTH_DETAIL_TOKEN="$(read_env_var HEALTH_DETAIL_TOKEN)"
 LOCAL_HEALTH="http://127.0.0.1:${BACKEND_PORT}/health"
+if [[ -n "${HEALTH_DETAIL_TOKEN}" ]]; then
+  LOCAL_HEALTH="${LOCAL_HEALTH}?token=${HEALTH_DETAIL_TOKEN}"
+fi
 if [[ "${GEBOT_NGINX_PORT}" == "80" ]]; then
   PUBLIC_HEALTH="http://${GEBOT_SERVER_NAME%% *}/health"
 else
@@ -91,6 +95,21 @@ RETRIEVAL_VER="$(parse_field "${LOCAL_JSON}" ".retrieval.version")"
 G110_LOOKUP="$(parse_field "${LOCAL_JSON}" ".retrieval.g110SheetLookup")"
 CREME_LUSTRANTE="$(parse_field "${LOCAL_JSON}" ".retrieval.cremeLustranteInCatalog")"
 POELE_SLUG="$(parse_field "${LOCAL_JSON}" ".retrieval.poeleOpenRecommendationSlug")"
+
+if [[ -z "${HEALTH_COMMIT}" ]]; then
+  if echo "${LOCAL_JSON}" | grep -qE '"ok"[[:space:]]*:[[:space:]]*true'; then
+    HEALTH_COMMIT="$(pm2 logs gebot-backend --lines 50 --nostream 2>/dev/null \
+      | sed -n "s/.*commit: '\([^']*\)'.*/\1/p" | tail -1)"
+    if [[ -n "${HEALTH_COMMIT}" ]]; then
+      warn "Minimal /health (production) — commit read from PM2 startup logs"
+    else
+      warn "Minimal /health only — set HEALTH_DETAIL_TOKEN in ${ENV_FILE} for full verification"
+      HEALTH_COMMIT="${GIT_COMMIT}"
+    fi
+  else
+    fail "Cannot parse /health response"
+  fi
+fi
 
 if [[ "${HEALTH_COMMIT}" != "${GIT_COMMIT}" ]]; then
   fail "Health commit (${HEALTH_COMMIT}) != git HEAD (${GIT_COMMIT}) — PM2 still runs old dist/. Fix: pm2 delete gebot-backend && pm2 start ecosystem.config.js && pm2 save"

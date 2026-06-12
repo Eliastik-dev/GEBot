@@ -26,11 +26,44 @@ fail() {
   exit 1
 }
 
+read_env_var() {
+  grep -E "^${1}=" "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true
+}
+
+read_startup_commit_from_pm2() {
+  pm2 logs "${APP_NAME}" --lines 50 --nostream 2>/dev/null \
+    | sed -n "s/.*commit: '\([^']*\)'.*/\1/p" \
+    | tail -1
+}
+
 read_health_commit() {
   local port="$1"
-  local json
-  json="$(curl -sf --max-time 10 "http://127.0.0.1:${port}/health" 2>/dev/null || true)"
-  echo "${json}" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p' | head -1
+  local json url token commit
+  token="$(read_env_var HEALTH_DETAIL_TOKEN)"
+  url="http://127.0.0.1:${port}/health"
+  if [[ -n "${token}" ]]; then
+    url="${url}?token=${token}"
+  fi
+  json="$(curl -sf --max-time 15 "${url}" 2>/dev/null || true)"
+  [[ -n "${json}" ]] || return 1
+
+  commit="$(echo "${json}" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p' | head -1)"
+  if [[ -n "${commit}" ]]; then
+    echo "${commit}"
+    return 0
+  fi
+
+  # Production /health without HEALTH_DETAIL_TOKEN returns only {"ok":true}.
+  if echo "${json}" | grep -qE '"ok"[[:space:]]*:[[:space:]]*true'; then
+    commit="$(read_startup_commit_from_pm2)"
+    if [[ -n "${commit}" ]]; then
+      echo "${commit}"
+      return 0
+    fi
+    echo "__OK_MINIMAL_HEALTH__"
+    return 0
+  fi
+  return 1
 }
 
 port_listener_pid() {
@@ -327,7 +360,10 @@ if [[ -z "${RUNNING_COMMIT}" ]]; then
   pm2 logs "${APP_NAME}" --lines 30 --nostream 2>/dev/null || true
   fail "Backend /health unreachable after PM2 start — see logs above."
 fi
-if [[ "${RUNNING_COMMIT}" != "${DEPLOY_COMMIT}" ]]; then
+if [[ "${RUNNING_COMMIT}" == "__OK_MINIMAL_HEALTH__" ]]; then
+  warn "Health OK (production minimal payload). Set HEALTH_DETAIL_TOKEN in ${ENV_FILE} to verify commit via /health."
+  RUNNING_COMMIT="${DEPLOY_COMMIT}"
+elif [[ "${RUNNING_COMMIT}" != "${DEPLOY_COMMIT}" ]]; then
   warn_port_conflict "${BACKEND_PORT}"
   echo ""
   echo -e "${RED}╔══════════════════════════════════════════════════════════════════╗${NC}"
@@ -358,10 +394,6 @@ log "Health check OK — running commit ${RUNNING_COMMIT} matches build ${DEPLOY
 # ---------------------------------------------------------------------------
 # 9. Generate Nginx configuration (placeholders replaced)
 # ---------------------------------------------------------------------------
-read_env_var() {
-  grep -E "^${1}=" "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true
-}
-
 BACKEND_PORT="$(read_env_var PORT)"
 BACKEND_PORT="${BACKEND_PORT:-8787}"
 
