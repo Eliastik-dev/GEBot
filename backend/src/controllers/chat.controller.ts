@@ -27,7 +27,7 @@ import {
   summarizeNodeForDebug,
   AUTOMOTIVE_EXHAUST_SUPPLEMENT_QUERY,
 } from "../services/rag.service.js";
-import { hasDescalingContext, hasHeatingCircuitContext, isBuildingEnvelopeLeakContext, isPersonalDrinkwareOutOfCatalog } from "../utils/diagnostic-rules.js";
+import { hasDescalingContext, hasHeatingCircuitContext, isBuildingEnvelopeLeakContext, isBuildingSurfaceSealingContext, isPersonalDrinkwareOutOfCatalog } from "../utils/diagnostic-rules.js";
 import {
   countProductKnowledge,
   detectCatalogProductCitations,
@@ -48,6 +48,7 @@ import type { Audience, ChatRequestBody, Locale, ProductTheme, Reseller } from "
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { fireAndForget, withTimeout } from "../utils/async.js";
 import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection } from "../utils/amazon.js";
+import { resolveFeedbackProductCorrectionContext } from "../utils/feedback-correction.js";
 import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, normalizeAudience, normalizeLocale } from "../utils/locale.js";
 import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectCitedProductReply, buildDirectTechnicalSheetReply, buildEscalationSection, buildHandoff, buildPurchaseAvailabilityIntro, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
 import {
@@ -452,14 +453,16 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       const conversationFull = `${preAnalysisTranscript}\n${message}`;
       if (
         extractedMeta.needs_clarification &&
-        isBuildingEnvelopeLeakContext(conversationFull) &&
-        extractedMeta.missing_params.every((p) => p === "fluid")
+        (isBuildingSurfaceSealingContext(conversationFull) || isBuildingEnvelopeLeakContext(conversationFull)) &&
+        extractedMeta.missing_params.every((p) =>
+          ["fluid", "joint_service_fluid"].includes(p),
+        )
       ) {
         extractedMeta.needs_clarification = false;
         extractedMeta.missing_params = [];
         extractedMeta.fluid = null;
         if (
-          ["leak_repair", "pipe_repair", "inaccessible_leak", "general_technical"].includes(
+          ["leak_repair", "pipe_repair", "inaccessible_leak", "general_technical", "silicone_application"].includes(
             extractedMeta.intent,
           )
         ) {
@@ -543,7 +546,11 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         if (isFactualProductQuestion(citationScanText)) extractedMeta.intent = "product_info";
         if (!extractedMeta.material && /\bpvc\b/.test(citeNorm)) extractedMeta.material = "pvc";
         if (!extractedMeta.pressure && /\bsous\s+pression\b/.test(citeNorm)) extractedMeta.pressure = "pressurized";
-        if (!extractedMeta.fluid && /\b(canalisation|tuyau|eau|potable)\b/.test(citeNorm)) extractedMeta.fluid = "eau";
+        if (!extractedMeta.fluid && /\b(canalisation|tuyau|eau|potable)\b/.test(citeNorm)) {
+          if (!isBuildingSurfaceSealingContext(citationScanText)) {
+            extractedMeta.fluid = "eau";
+          }
+        }
         console.log("[/api/chat] catalog_citation_bypass", {
           sessionId,
           slugs: catalogCitation.products.map((p) => p.slug),
@@ -609,6 +616,56 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       }
 
       const ongoingConversationEarly = hasOngoingConversation(historyMessages);
+      const feedbackCorrection = resolveFeedbackProductCorrectionContext(historyMessages, message);
+
+      if (
+        feedbackCorrection &&
+        env.PRODUCT_KNOWLEDGE_ENABLED &&
+        catalogSizeEarly > 0
+      ) {
+        const correctionProduct =
+          (hasCatalogCitation ? catalogCitation.best : null) ??
+          (await lookupCitedCatalogProductForRecommendation({
+            locale: pkLocaleEarly,
+            userQuery: message,
+            audience,
+          }));
+        if (correctionProduct) {
+          console.log("[/api/chat] feedback_product_correction", {
+            sessionId,
+            slug: correctionProduct.slug,
+            trainingQuery: feedbackCorrection.trainingQuery.slice(0, 120),
+            penalizedSlugs: feedbackCorrection.dislikedProductSlugs,
+          });
+          extractedMeta.needs_clarification = false;
+          extractedMeta.missing_params = [];
+          extractedMeta.intent = "product_info";
+          const resellerPromiseCorrection =
+            locale === "pl" ? Promise.resolve<Reseller[]>([]) : getCachedResellers().catch(() => []);
+          const cacheKeyCorrection = `${ANSWER_CACHE_VERSION}|${locale}|${audience}|${effectiveTheme ?? "none"}|fb:${feedbackCorrection.trainingQuery.toLowerCase()}|${correctionProduct.slug}`;
+          await deliverDirectTechnicalSheetTurn({
+            res,
+            sessionId,
+            locale,
+            audience,
+            handoff,
+            geoCountry: effectiveGeoCountry,
+            product: correctionProduct,
+            extractedMeta,
+            queryForRetrieval: feedbackCorrection.trainingQuery,
+            trainingQuery: feedbackCorrection.trainingQuery,
+            cacheKey: cacheKeyCorrection,
+            startedAt,
+            resellerPromise: resellerPromiseCorrection,
+            ongoingConversation: ongoingConversationEarly,
+            buildReply: buildDirectCitedProductReply,
+            logStatus: "direct_cited_product",
+            sessionTheme: effectiveTheme,
+          });
+          return;
+        }
+      }
+
       if (
         env.PRODUCT_KNOWLEDGE_ENABLED &&
         catalogSizeEarly > 0 &&
@@ -1364,10 +1421,11 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
 
       const extractedComplementary = extractComplementaryQuestionBlock(answer);
       answer = extractedComplementary.cleaned;
+      const complementaryContext = `${queryForRetrieval}\n${message}`.trim();
       const upsell =
         productFollowUp
           ? null
-          : extractedComplementary.question ?? buildComplementarySuggestion(locale, audience, message);
+          : extractedComplementary.question ?? buildComplementarySuggestion(locale, audience, complementaryContext);
       if (upsell && !isComplementaryQuestion(answer)) {
         const withUpsell = `\n\n${upsell.trim()}`;
         answer += withUpsell;
@@ -1394,6 +1452,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
         response_context: {
           search_query: searchQuery,
           query_for_retrieval: queryForRetrieval,
+          training_query: queryForRetrieval,
           conversation_transcript: conversationTranscript.slice(0, 8_000),
           source_urls: sourceUrls,
           retrieval_count: retrievalCount,

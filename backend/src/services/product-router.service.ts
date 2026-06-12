@@ -2,10 +2,13 @@
  * Phase 2: Route chat queries to pre-synthesized product_knowledge rows.
  */
 
-import { isAutomotiveExhaustContext } from "../dynamic-reranker.js";
+import {
+  isAutomotiveExhaustContext,
+} from "../dynamic-reranker.js";
 import {
   isPersonalDrinkwareOutOfCatalog,
   isPiscineInaccessiblePipeLeak,
+  isBuildingSurfaceSealingContext,
   isWoodStoveCosmeticCareContext,
 } from "../utils/diagnostic-rules.js";
 import type { ExtractedMetadata } from "../intent-extractor.js";
@@ -130,10 +133,22 @@ export function resolveUseCaseTags(input: ProductRouterInput): string[] {
   if (theme === "maintenance") tags.add("maintenance");
 
   if (metadata.intent === "sealing_assembly") {
-    tags.add("etancheite_filetage");
-    tags.add("plomberie_raccord");
-    if (/eau potable|potable|sanitaire/.test(q)) tags.add("eau_potable");
-    if (/evacuation|egout|usee/.test(q)) tags.add("evacuation");
+    const buildingSurface =
+      isBuildingSurfaceSealingContext(combinedText) ||
+      (metadata.material != null &&
+        /carrelage|terrasse|balcon|dalle|beton|pierre|facade|mur|brique/.test(metadata.material));
+    if (buildingSurface) {
+      tags.add("facade");
+      tags.add("carrelage");
+      if (/gouttiere|gouttieres|zinc|zinguerie|descente\s+pluviale|toiturol|ms[\s*-]?zinc/i.test(q)) {
+        tags.add("toiture");
+      }
+    } else {
+      tags.add("etancheite_filetage");
+      tags.add("plomberie_raccord");
+      if (/eau potable|potable|sanitaire/.test(q)) tags.add("eau_potable");
+      if (/evacuation|egout|usee/.test(q)) tags.add("evacuation");
+    }
   }
   const isDescaling = /\b(detartr|descal|calcaire|tartre|detartrans|g6[0-3])\b/.test(q);
   if (isDescaling) {

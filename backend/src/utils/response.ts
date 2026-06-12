@@ -4,6 +4,8 @@ import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { formatUserFacingMismatchNote, normalizeStoredProductTheme } from "../services/product-theme.service.js";
 import { removeAmazonSections } from "./amazon.js";
 import { detectTheme } from "./locale.js";
+import { isBuildingSurfaceSealingContext } from "./diagnostic-rules.js";
+import { asksMetalThreadPasteJoint } from "./joint-paste.js";
 import { decodeHtmlEntities, normalizeText } from "./text.js";
 
 export function buildHandoff(locale: Locale, audience: Audience | null): HandoffPayload {
@@ -30,9 +32,28 @@ export function buildHandoff(locale: Locale, audience: Audience | null): Handoff
 }
 
 
+function matchesComplementaryHint(text: string, item: (typeof COMPLEMENTARY_HINTS)[number]): boolean {
+  const lower = text.toLowerCase();
+  const n = normalizeText(text);
+  if (!item.keywords.some((k) => lower.includes(k))) return false;
+
+  if (isBuildingSurfaceSealingContext(text)) {
+    if (item.id === "ptfe" || item.id === "plumbing_seal") return false;
+    if (item.id === "surface_cleaner") return false;
+  }
+
+  if (item.context === "plumbing_thread") {
+    return (
+      asksMetalThreadPasteJoint(text) ||
+      /\b(raccord|filetage|filete|plomberie|canalisation|tube|tuyau)\b/.test(n)
+    );
+  }
+
+  return true;
+}
+
 export function buildComplementarySuggestion(locale: Locale, audience: Audience, message: string): string {
-  const lower = message.toLowerCase();
-  const match = COMPLEMENTARY_HINTS.find((item) => item.keywords.some((k) => lower.includes(k)));
+  const match = COMPLEMENTARY_HINTS.find((item) => matchesComplementaryHint(message, item));
   if (!match) return "";
   if (locale === "nl") {
     return `Wilt u ook het aanvullende product ${match.product.nl} voor een complete oplossing?\n_Reageer eenvoudig met: ja of nee._`;
@@ -77,8 +98,7 @@ export function buildComplementaryFollowUp(locale: Locale, answer: "yes" | "no",
     return "Parfait, nous restons sur la solution actuelle.";
   }
 
-  const lower = sourceMessage.toLowerCase();
-  const match = COMPLEMENTARY_HINTS.find((item) => item.keywords.some((k) => lower.includes(k)));
+  const match = COMPLEMENTARY_HINTS.find((item) => matchesComplementaryHint(sourceMessage, item));
   if (!match) {
     if (locale === "en") return "Great. I can suggest a complementary product once you confirm the exact application details.";
     if (locale === "nl") return "Prima. Ik kan een aanvullend product voorstellen zodra u de exacte toepassing bevestigt.";

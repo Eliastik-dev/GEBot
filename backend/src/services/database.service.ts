@@ -1,6 +1,6 @@
 import { env } from "../config/env.js";
 import { supabase } from "../config/supabase.js";
-import type { Audience, Locale, ProductTheme, StoredMessage, ChatRole } from "../types/index.js";
+import type { Audience, Locale, ProductTheme, StoredMessage, ChatRole, ResponseContextSnapshot } from "../types/index.js";
 import type { ExtractedMetadata } from "../intent-extractor.js";
 import { VALID_THEMES } from "../config/constants.js";
 
@@ -158,12 +158,28 @@ export async function saveMessage(
 export async function loadRecentMessages(sessionId: string): Promise<StoredMessage[]> {
   const { data, error } = await supabase
     .from("chat_messages")
-    .select("role, content, response_context")
+    .select("id, role, content, user_feedback, response_context")
     .eq("session_id", sessionId)
     .order("created_at", { ascending: false })
     .limit(Math.max(env.CHAT_HISTORY_LIMIT, 30));
   if (error) throw error;
-  return [...(data ?? [])].reverse();
+  return [...(data ?? [])].reverse().map((row) => {
+    const r = row as {
+      id?: string;
+      role: ChatRole;
+      content: string;
+      user_feedback?: number | null;
+      response_context?: ResponseContextSnapshot | null;
+    };
+    const msg: StoredMessage = {
+      role: r.role,
+      content: r.content,
+      user_feedback: r.user_feedback ?? null,
+      response_context: r.response_context ?? null,
+    };
+    if (r.id) msg.id = r.id;
+    return msg;
+  });
 }
 
 

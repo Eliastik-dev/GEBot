@@ -7,6 +7,7 @@ import type { ExtractedMetadata } from "../intent-extractor.js";
 import type { ResponseContextSnapshot } from "../types/retrieval-feedback.js";
 import { extractRecommendedProduct } from "../utils/amazon.js";
 import { fireAndForget } from "../utils/async.js";
+import { extractOriginalUserQuestionFromTranscript } from "../utils/feedback-correction.js";
 import {
   buildConversationTranscript,
   lastUserTurnContent,
@@ -127,10 +128,16 @@ export async function recordRetrievalFeedback(
   const retrievalMismatch = detectRetrievalMismatch(recommendedProduct, productSlugs);
 
   const conversation = await loadConversationContextBefore(sessionId, assistant.created_at);
+  const trainingQuery =
+    (typeof ctx.training_query === "string" && ctx.training_query.trim()) ||
+    (typeof ctx.query_for_retrieval === "string" && ctx.query_for_retrieval.trim()) ||
+    extractOriginalUserQuestionFromTranscript(conversation.transcript) ||
+    conversation.lastUserTurn ||
+    null;
   const userQuery =
+    trainingQuery ||
     (typeof ctx.conversation_transcript === "string" && ctx.conversation_transcript.trim()) ||
     conversation.transcript ||
-    conversation.lastUserTurn ||
     (typeof ctx.query_for_retrieval === "string" ? ctx.query_for_retrieval : null) ||
     null;
   const sessionMeta = await loadSessionMeta(sessionId);
@@ -144,7 +151,7 @@ export async function recordRetrievalFeedback(
     theme: sessionMeta.theme,
     user_query: userQuery,
     assistant_reply: assistant.content.slice(0, 12_000),
-    search_query: ctx.search_query ?? null,
+    search_query: trainingQuery ?? ctx.search_query ?? null,
     intent: assistant.intent,
     retrieval_path: ctx.retrieval_path ?? null,
     product_slugs: productSlugs,

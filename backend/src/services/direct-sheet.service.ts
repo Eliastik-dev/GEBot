@@ -33,6 +33,8 @@ export type DirectSheetTurnContext = {
   product: ProductKnowledgeRow;
   extractedMeta: ExtractedMetadata;
   queryForRetrieval: string;
+  /** Question initiale pour indexer le 👍 (correction testeur). */
+  trainingQuery?: string;
   cacheKey: string;
   startedAt: number;
   resellerPromise: Promise<Reseller[]>;
@@ -90,8 +92,11 @@ export async function deliverDirectTechnicalSheetTurn(ctx: DirectSheetTurnContex
     intent: ctx.extractedMeta.intent,
     response_context: {
       query_for_retrieval: ctx.queryForRetrieval,
+      training_query: ctx.trainingQuery ?? ctx.queryForRetrieval,
+      feedback_correction: Boolean(ctx.trainingQuery),
       retrieval_path: "product_knowledge",
       product_slugs: [ctx.product.slug],
+      recommended_product: ctx.product.canonical_name,
       direct_technical_sheet: logStatus === "direct_technical_sheet",
       direct_cited_product: logStatus === "direct_cited_product",
     },

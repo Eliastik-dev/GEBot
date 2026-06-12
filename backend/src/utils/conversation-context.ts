@@ -8,6 +8,7 @@ import {
   extractBoldCatalogProductName,
   extractRecommendedProduct,
 } from "./amazon.js";
+import { extractOriginalUserQuestionFromTranscript } from "./feedback-correction.js";
 import { hasOngoingConversation, isInformationalProductQuestion, normalizeText } from "./text.js";
 
 export type ConversationTurn = { role: string; content: string };
@@ -38,17 +39,29 @@ export function lastUserTurnContent(turns: ConversationTurn[]): string | null {
   return null;
 }
 
-/** Best text for semantic match against stored feedback (enriched search > full transcript). */
+/** Best text for semantic match against stored feedback (question initiale, pas transcript bruité). */
 export function feedbackEmbeddingText(row: {
   search_query?: string | null;
   user_query?: string | null;
 }): string {
   const uq = row.user_query?.trim() ?? "";
   const sq = row.search_query?.trim() ?? "";
-  if (uq.length >= 20 && uq.length >= sq.length) return uq;
-  if (sq.length >= 24) return sq;
+
+  const clean = (text: string): boolean =>
+    text.length >= 12 && text.length <= 900 && !/\bassistant:\b/i.test(text);
+
+  if (clean(uq) && (!sq || uq.length <= sq.length + 80)) return uq;
+  if (clean(sq)) return sq;
+
+  const fromTranscript = extractOriginalUserQuestionFromTranscript(uq);
+  if (fromTranscript) return fromTranscript;
+
+  if (uq.length >= 12) return uq.slice(0, EMBED_SLICE);
+  if (sq.length >= 12) return sq.slice(0, EMBED_SLICE);
   return uq || sq;
 }
+
+const EMBED_SLICE = 1_200;
 
 /** Last catalogue product named in an assistant reply this session (MODE 2 heading or MODE 1 bold name). */
 export function getLastDiscussedProductFromHistory(messages: StoredMessage[]): string | null {

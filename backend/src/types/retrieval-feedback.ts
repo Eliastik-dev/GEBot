@@ -2,6 +2,9 @@ export type ResponseContextSnapshot = {
   search_query?: string;
   /** Enriched user question used for retrieval (may merge prior turns). */
   query_for_retrieval?: string;
+  /** Question initiale indexée lors d'un 👍 après correction testeur. */
+  training_query?: string;
+  feedback_correction?: boolean;
   /** Multi-turn transcript at answer time — used when recording feedback. */
   conversation_transcript?: string;
   source_urls?: string[];
@@ -9,6 +12,9 @@ export type ResponseContextSnapshot = {
   retrieval_path?: "product_knowledge" | "vector_rag";
   product_slugs?: string[];
   use_case_tags?: string[];
+  recommended_product?: string;
+  direct_technical_sheet?: boolean;
+  direct_cited_product?: boolean;
 };
 
 export type RetrievalFeedbackEvent = {

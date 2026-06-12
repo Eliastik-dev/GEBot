@@ -208,13 +208,14 @@ function computeIntentBoost(text: string, metadata: ExtractedMetadata, userQuery
   }
 
   // Extra boost for surface-sealing products when context is building/tiles
-  const isSurfaceContext = metadata.material && /carrelage|terrasse|dalle|beton|pierre|facade|mur|brique/.test(metadata.material);
+  const isSurfaceContext = metadata.material && /carrelage|terrasse|balcon|dalle|beton|pierre|facade|mur|brique/.test(metadata.material);
   if (isSurfaceContext && metadata.intent === "sealing_assembly") {
-    const surfaceProductKeywords = ["acrybat", "mastic", "acrylique", "joint", "fissure", "terrasse", "carrelage", "facade"];
+    const surfaceProductKeywords = ["exthane", "acrybat", "mastic", "acrylique", "joint", "fissure", "terrasse", "carrelage", "facade"];
     const surfaceHits = surfaceProductKeywords.filter((kw) => text.includes(kw));
     if (surfaceHits.length > 0) {
       boost += 0.12 * (surfaceHits.length / surfaceProductKeywords.length);
     }
+    if (text.includes("exthane")) boost += 0.18;
   }
 
   return boost;
@@ -307,12 +308,20 @@ function computeDemotionPenalty(
   }
 
   // Demote plumbing-only products for building/surface contexts (e.g. tile crack)
-  const isSurfaceContext = metadata.material && /carrelage|terrasse|dalle|beton|pierre|facade|mur|brique/.test(metadata.material);
+  const isSurfaceContext = metadata.material && /carrelage|terrasse|balcon|dalle|beton|pierre|facade|mur|brique/.test(metadata.material);
   if (isSurfaceContext) {
     const plumbingOnlySignals = ["eau potable", "raccord", "filete", "ptfe", "pvc", "tuyau", "canalisation"];
     const plumbingHits = plumbingOnlySignals.filter((kw) => text.includes(kw));
     if (plumbingHits.length >= 2) {
       penalty += 0.20;
+    }
+    const queryNorm = normalizeText(userQuery);
+    const zincRoofContext = /\b(zinc|zinguerie|gouttiere|toiture|toiturol)\b/.test(queryNorm);
+    if (!zincRoofContext && (text.includes("ms zinc") || text.includes("toiturol"))) {
+      penalty += 0.22;
+    }
+    if (text.includes("silicone sanitaire") || (text.includes("sanitaire") && text.includes("silicone"))) {
+      penalty += 0.18;
     }
   }
 

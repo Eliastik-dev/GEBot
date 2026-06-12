@@ -13,13 +13,22 @@ export type ProductTheme = "plomberie" | "piscine" | "chauffage" | "batiment" | 
 export type Locale = "fr" | "en" | "nl" | "pl";
 export type ChatRole = "user" | "assistant";
 export type ResponseContextSnapshot = {
+  search_query?: string;
+  query_for_retrieval?: string;
+  training_query?: string;
+  feedback_correction?: boolean;
+  conversation_transcript?: string;
   product_slugs?: string[];
   recommended_product?: string;
+  retrieval_path?: "product_knowledge" | "vector_rag";
+  use_case_tags?: string[];
 };
 
 export type StoredMessage = {
   role: ChatRole;
   content: string;
+  id?: string;
+  user_feedback?: number | null;
   response_context?: ResponseContextSnapshot | null;
 };
 export type Reseller = { name: string; url?: string; city?: string; country?: string };

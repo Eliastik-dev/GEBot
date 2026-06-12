@@ -33,6 +33,8 @@ void i18n.use(initReactI18next).init({
           "Parfait, j'ai bien pris en compte votre profil {{profile}}. Je suis pret a vous accompagner. Quelle est votre question technique ? (Ex: Quelle pate a joint pour le metal ?)",
         feedbackHelpful: "Utile",
         feedbackNotHelpful: "Pas utile",
+        feedbackCorrectionHint:
+          "Merci. Indiquez le produit GEB attendu (nom ou reference) — GEBot repondra avec la bonne recommandation. Likez cette reponse pour qu'il s'en souvienne sur des questions similaires.",
         themePlomberie: "Plomberie / Sanitaire",
         themePiscine: "Piscine",
         themeChauffage: "Chauffage / Feu",
@@ -72,6 +74,8 @@ void i18n.use(initReactI18next).init({
           "Great, your {{profile}} profile is saved. I am ready to help. What is your technical question?",
         feedbackHelpful: "Helpful",
         feedbackNotHelpful: "Not helpful",
+        feedbackCorrectionHint:
+          "Thanks. Name the expected GEB product — GEBot will reply with that recommendation. Like that answer so it remembers similar questions.",
         themePlomberie: "Plumbing / Sanitary",
         themePiscine: "Swimming Pool",
         themeChauffage: "Heating / Fire",
@@ -111,6 +115,8 @@ void i18n.use(initReactI18next).init({
           "Perfect, your profile {{profile}} is set. I am ready to assist you. What is your technical question? (Ex: Which joint compound for metal?)",
         feedbackHelpful: "Nuttig",
         feedbackNotHelpful: "Niet nuttig",
+        feedbackCorrectionHint:
+          "Bedankt. Geef het verwachte GEB-product door — GEBot antwoordt met die aanbeveling. Like dat antwoord zodat het vergelijkbare vragen onthoudt.",
         themePlomberie: "Loodgieterij / Sanitair",
         themePiscine: "Zwembad",
         themeChauffage: "Verwarming / Vuur",
@@ -150,6 +156,8 @@ void i18n.use(initReactI18next).init({
           "Profil {{profile}} zostal zapisany. Jestem gotowy pomoc. Jakie jest Twoje pytanie techniczne? (Np: Jaka pasta uszczelniajaca do metalu?)",
         feedbackHelpful: "Pomocne",
         feedbackNotHelpful: "Niepomocne",
+        feedbackCorrectionHint:
+          "Dziekuje. Podaj oczekiwany produkt GEB — GEBot odpowie ta rekomendacja. Polub odpowiedz, aby zapamietal podobne pytania.",
         themePlomberie: "Hydraulika / Sanitarne",
         themePiscine: "Basen",
         themeChauffage: "Ogrzewanie / Ogien",

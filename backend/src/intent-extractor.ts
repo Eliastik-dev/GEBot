@@ -75,6 +75,7 @@ import {
   hasObviousLeakOrPipeDamageIntent,
   isWoodStoveCosmeticCareContext,
   isBuildingEnvelopeLeakContext,
+  isBuildingSurfaceSealingContext,
   isPersonalDrinkwareOutOfCatalog,
 } from "./utils/diagnostic-rules.js";
 import { mentionsLikelyProductPhrase } from "./utils/product-mention.js";
@@ -177,10 +178,14 @@ function leakRequiresPressureContext(
 }
 
 function applyBuildingEnvelopeLeakEnrichment(merged: ExtractedMetadata, conversationText: string): void {
-  if (!isBuildingEnvelopeLeakContext(conversationText)) return;
+  const buildingContext =
+    isBuildingSurfaceSealingContext(conversationText) || isBuildingEnvelopeLeakContext(conversationText);
+  if (!buildingContext) return;
 
   if (
-    ["leak_repair", "pipe_repair", "inaccessible_leak", "general_technical"].includes(merged.intent)
+    ["leak_repair", "pipe_repair", "inaccessible_leak", "general_technical", "silicone_application"].includes(
+      merged.intent,
+    )
   ) {
     merged.intent = "sealing_assembly";
   }
@@ -188,7 +193,7 @@ function applyBuildingEnvelopeLeakEnrichment(merged: ExtractedMetadata, conversa
   const t = normalizeExtractionText(conversationText);
   if (!merged.material) {
     if (/\bzinc\b/.test(t)) merged.material = "zinc";
-    else if (/\b(carrelage|terrasse)\b/.test(t)) merged.material = "carrelage";
+    else if (/\b(carrelage|terrasse|balcon)\b/.test(t)) merged.material = "carrelage";
     else if (/\b(beton|dalle)\b/.test(t)) merged.material = "beton";
     else if (/\b(facade|mur|bardage)\b/.test(t)) merged.material = "facade";
     else if (/\b(tuile|ardoise)\b/.test(t)) merged.material = "tuile";
@@ -201,6 +206,15 @@ function applyBuildingEnvelopeLeakEnrichment(merged: ExtractedMetadata, conversa
   merged.needs_clarification = merged.missing_params.length > 0;
 
   const extraSynonyms = ["etancheite batiment", "mastic facade"];
+  if (/\b(carrelage|terrasse|balcon|dalle)\b/.test(t)) {
+    extraSynonyms.push(
+      "exthane",
+      "exthane colle et joint",
+      "joint carrelage exterieur",
+      "mastic colle joint",
+      "joint etancheite carrelage",
+    );
+  }
   if (/\b(zinc|zinguerie|gouttiere|toiture)\b/.test(t)) {
     extraSynonyms.push("ms zinc", "mastic zinc", "etancheite toiture", "toiturol", "gebetanche toiture");
   }
@@ -215,7 +229,9 @@ function resolveLeakMissingParams(
   faucetLeak: boolean,
 ): string[] {
   const missing: string[] = [];
-  if (!merged.fluid && !isBuildingEnvelopeLeakContext(conversationText)) missing.push("fluid");
+  if (!merged.fluid && !isBuildingEnvelopeLeakContext(conversationText) && !isBuildingSurfaceSealingContext(conversationText)) {
+    missing.push("fluid");
+  }
   if (
     leakRequiresPipeDimensions(merged.intent, conversationText, merged) &&
     !merged.diameter &&
@@ -318,7 +334,7 @@ function regexFallbackExtraction(transcript: string, currentMessage: string): Ex
       )
     : [];
 
-  const material = /\b(cuivre|pvc|pehd|multicouche|inox|acier|laiton|fonte|ceramique|carrelage|terrasse|dalle|beton|pierre|facade|mur|brique)\b/.exec(fullText)?.[1] ?? null;
+  const material = /\b(cuivre|pvc|pehd|multicouche|inox|acier|laiton|fonte|ceramique|carrelage|terrasse|balcon|dalle|beton|pierre|facade|mur|brique)\b/.exec(fullText)?.[1] ?? null;
   const accessibility: ExtractedMetadata["accessibility"] =
     hasInaccessible ? "inaccessible" : "unknown";
 
@@ -358,8 +374,8 @@ function buildSynonyms(intent: Intent, fluid: string | null, material: string | 
 
   // Context-aware sealing synonyms: plumbing vs. building surfaces
   if (intent === "sealing_assembly") {
-    if (material && /carrelage|terrasse|dalle|beton|pierre|facade|mur|sol|brique/.test(material)) {
-      synonyms.push("mastic", "acrylique", "joint carrelage", "fissure", "terrasse", "étanchéité bâtiment");
+    if (material && /carrelage|terrasse|balcon|dalle|beton|pierre|facade|mur|sol|brique/.test(material)) {
+      synonyms.push("mastic", "acrylique", "joint carrelage", "fissure", "terrasse", "étanchéité bâtiment", "exthane");
     } else {
       synonyms.push("raccord", "filetage", "PTFE", "ruban");
     }
@@ -385,6 +401,7 @@ function buildSynonyms(intent: Intent, fluid: string | null, material: string | 
     inox: ["inox", "acier inoxydable", "stainless"],
     carrelage: ["carrelage", "céramique", "faïence", "grès"],
     terrasse: ["terrasse", "extérieur", "dalle"],
+    balcon: ["balcon", "terrasse", "extérieur"],
     dalle: ["dalle", "béton", "sol"],
     beton: ["béton", "ciment"],
     pierre: ["pierre", "naturelle"],
@@ -419,8 +436,9 @@ Return ONLY valid JSON with these keys:
 Rules:
 - For leak_repair/pipe_repair/inaccessible_leak: require **fluid** only when unknown (eau potable, chauffage, gaz, évacuation…). Do NOT add "diameter" or "damage_extent" unless pipe_repair on a rigid pipe with hole/crack AND fluid already known. Do NOT add "pressure" for faucet/fixture leaks, joints, silicone, gouttières — only for **gas/GPL** or explicit pressurized **pipe/canalisation** leak
 - If the user says they do not know pressure or diameter, do NOT ask again — leave missing_params empty for those fields
-- For **paste joint / thread paste / sealing paste** (which jointing product). If the contact medium / service fluid is NOT stated (*e.g.* plain "pâte à joint pour le métal" or "pour un raccord fileté" without mentioning **eau potable**, **eaux usées**, **eau glycolée ou caloporteur**, **circuit chauffage**, **hydrocarbures**, **gaz**), set needs_clarification=true and add missing_params containing **"joint_service_fluid"** — GEB has several incompatible product ranges
-- For general_technical, product_info, installation_lubrication, silicone_application: do NOT require diameter/pressure/material for generic questions — but DO require joint_service_fluid when the intent is ambiguous sealant/thread product without fluid context (see rule above)
+- For **paste joint / thread paste / sealing paste on threaded plumbing fittings** (metal raccord, filetage). If the contact medium / service fluid is NOT stated (*e.g.* plain "pâte à joint pour le métal" or "pour un raccord fileté" without mentioning **eau potable**, **eaux usées**, **eau glycolée ou caloporteur**, **circuit chauffage**, **hydrocarbures**, **gaz**), set needs_clarification=true and add missing_params containing **"joint_service_fluid"** — GEB has several incompatible product ranges
+- **Building envelope / façade / terrasse / carrelage / balcon** (joint de carrelage, mastic mur extérieur, infiltration pluie sur terrasse): intent=sealing_assembly, needs_clarification=false, NEVER add joint_service_fluid or fluid — rain/water infiltration is NOT a plumbing service fluid
+- For general_technical, product_info, installation_lubrication, silicone_application: do NOT require diameter/pressure/material for generic questions — require joint_service_fluid ONLY for ambiguous **plumbing thread paste** without fluid context (see rule above), never for building-surface mastic/joints
 - "inaccessible_leak" = user can't rotate/wrap tape, needs liquid resin — look for access constraints
 - "sealing_assembly" = new joint/fitting work without existing leak/damage
 - Distinguish installation/lubrication from actual damage repair
@@ -633,6 +651,16 @@ function applyJointServiceFluidAndNonLeakSanitizer(
   isLeakLike: boolean,
 ): void {
   const conversationText = `${transcript}\n${currentMessage}`;
+
+  if (isBuildingSurfaceSealingContext(conversationText)) {
+    merged.missing_params = merged.missing_params.filter(
+      (p) => !["joint_service_fluid", "fluid", "diameter", "pressure"].includes(p),
+    );
+    merged.fluid = null;
+    if (merged.missing_params.length === 0) merged.needs_clarification = false;
+    return;
+  }
+
   const pasteJointContext =
     asksMetalThreadPasteJoint(currentMessage) || asksMetalThreadPasteJoint(transcript);
   const heatingCircuitContext = hasHeatingCircuitContext(conversationText);

@@ -131,23 +131,42 @@ export function isPurePipeLeakDamageTurn(content: string): boolean {
   return hasObviousLeakOrPipeDamageIntent(content) && !isThreadedJointOrLiquidSealingTopic(content);
 }
 
+const BUILDING_SURFACE_RE =
+  /\b(toiture|toit|zinc|zinguerie|gouttiere|gouttieres|facade|bardage|membrane|charpente|couverture|descente\s+pluviale|terrasse|carrelage|balcon|loggia|dalle|beton|pierre|mur|tuile|ardoise|appui\s+de\s+fenetre|seuil)\b/;
+
+const PLUMBING_PIPE_CONTEXT_RE =
+  /\b(tuyau|tube|canalisation|pipe|pvc|cuivre|pehd|multicouche|raccord|conduit|robinet|mousseur|mitigeur|lavabo|evier|evacuation|egout|skimmer|refoulement|plomberie|filetage|filete|filasse|ruban\s+ptfe)\b/;
+
+/** Mur, terrasse, carrelage, façade, toiture… — hors canalisation. */
+export function hasBuildingSurfaceContext(text: string): boolean {
+  const n = normalizeText(text);
+  return BUILDING_SURFACE_RE.test(n) || /\b(batiment|building)\b/.test(n);
+}
+
+export function hasPlumbingPipeContext(text: string): boolean {
+  return PLUMBING_PIPE_CONTEXT_RE.test(normalizeText(text));
+}
+
+/**
+ * Joint / mastic / étanchéité sur enveloppe bâtiment (carrelage, terrasse, balcon, mur…).
+ * Distinct from pâte à joint filetage plomberie — ne jamais demander le fluide de service.
+ */
+export function isBuildingSurfaceSealingContext(text: string): boolean {
+  const n = normalizeText(text);
+  if (hasPlumbingPipeContext(text) && !BUILDING_SURFACE_RE.test(n)) return false;
+  if (!hasBuildingSurfaceContext(text)) return false;
+
+  return (
+    /\b(joint|mastic|etancheite|etancher|scellement|colle|silicone|infiltration|fuite|goutte|pluie)\b/.test(n) ||
+    /\b(joint\s+de\s+carrelage|joint\s+carrelage|joint\s+exterieur|joint\s+exterieure)\b/.test(n)
+  );
+}
+
 /** Fuite / infiltration sur enveloppe du bâtiment — pas de fluide de canalisation à préciser. */
 export function isBuildingEnvelopeLeakContext(text: string): boolean {
   const n = normalizeText(text);
   if (!/\b(fuit|fuite|infiltration|goutte|etancheite)\b/.test(n)) return false;
-
-  const plumbingContext =
-    /\b(tuyau|tube|canalisation|pipe|pvc|cuivre|pehd|multicouche|raccord|conduit|robinet|mousseur|mitigeur|lavabo|evier|evacuation|egout|skimmer|refoulement)\b/.test(
-      n,
-    );
-  if (plumbingContext) return false;
-
-  const buildingSurface =
-    /\b(toiture|toit|zinc|zinguerie|gouttiere|gouttieres|facade|bardage|membrane|etancheite|charpente|couverture|descente\s+pluviale|terrasse|carrelage|mur|tuile|ardoise)\b/.test(
-      n,
-    );
-  const buildingThemeOnly = /\b(batiment|building)\b/.test(n);
-
-  return buildingSurface || buildingThemeOnly;
+  if (hasPlumbingPipeContext(text)) return false;
+  return hasBuildingSurfaceContext(text);
 }
 

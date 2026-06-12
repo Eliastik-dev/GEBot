@@ -183,6 +183,7 @@ export function Widget({ apiBaseUrl }: Props) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [backendStatus, setBackendStatus] = useState<"searching" | "generating" | null>(null);
+  const [awaitingFeedbackCorrection, setAwaitingFeedbackCorrection] = useState(false);
   const [footerEditMode, setFooterEditMode] = useState<FooterEditMode>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const latestAssistantRef = useRef<HTMLDivElement | null>(null);
@@ -272,6 +273,8 @@ export function Widget({ apiBaseUrl }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messageId: msg.messageId, sessionId, feedback }),
       });
+      if (feedback === -1) setAwaitingFeedbackCorrection(true);
+      if (feedback === 1) setAwaitingFeedbackCorrection(false);
     } catch {
       /* best-effort */
     }
@@ -681,6 +684,13 @@ export function Widget({ apiBaseUrl }: Props) {
               >
                 {handoff.label}: {handoff.phone}
               </button>
+            )}
+            {awaitingFeedbackCorrection && (
+              <div
+                className="mb-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] leading-snug text-amber-950 sm:mb-2 sm:text-[11px]"
+              >
+                {t("feedbackCorrectionHint")}
+              </div>
             )}
             <div className="flex gap-1.5 max-[340px]:flex-col sm:gap-2">
               <input

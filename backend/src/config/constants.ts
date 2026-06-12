@@ -42,11 +42,19 @@ export const RESELLER_CACHE_TTL_MS = 15 * 60 * 1000;
 export const GEO_TIMEOUT_MS = 1500;
 export const AMAZON_LINKS_BY_LOCALE = loadAmazonLinksFromWorkbook(env.AMAZON_LINKS_XLSX_PATH);
 export const RESELLER_DIRECTORY_URL = "https://www.geb.fr/revendeurs";
-export const ANSWER_CACHE_VERSION = "v5_7_resine_inaccessible_extended";
+export const ANSWER_CACHE_VERSION = "v5_8_building_surface_sealing";
 
-export const COMPLEMENTARY_HINTS: Array<{ keywords: string[]; product: Record<Locale, string> }> = [
+export const COMPLEMENTARY_HINTS: Array<{
+  id: string;
+  /** When set, extra context checks apply before suggesting this product. */
+  context?: "plumbing_thread";
+  keywords: string[];
+  product: Record<Locale, string>;
+}> = [
   {
-    keywords: ["joint", "seal", "etancheite"],
+    id: "ptfe",
+    context: "plumbing_thread",
+    keywords: ["raccord", "filetage", "filete", "ptfe", "filasse", "pate a joint", "pate joint", "plomberie", "canalisation", "tube"],
     product: {
       fr: "ruban PTFE GEB",
       en: "GEB PTFE tape",
@@ -55,6 +63,7 @@ export const COMPLEMENTARY_HINTS: Array<{ keywords: string[]; product: Record<Lo
     },
   },
   {
+    id: "surface_cleaner",
     keywords: ["colle", "adhesif", "mastic"],
     product: {
       fr: "nettoyant de surface GEB",
@@ -64,6 +73,7 @@ export const COMPLEMENTARY_HINTS: Array<{ keywords: string[]; product: Record<Lo
     },
   },
   {
+    id: "plumbing_seal",
     keywords: ["canalisation", "raccord", "plomberie", "tube"],
     product: {
       fr: "solution d'etancheite GEB",

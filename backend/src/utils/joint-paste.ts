@@ -5,6 +5,7 @@
 import type { StoredMessage } from "../types/index.js";
 import {
   hasInaccessibleThreadedJointForResinContext,
+  isBuildingSurfaceSealingContext,
   isPiscineInaccessiblePipeLeak,
 } from "./diagnostic-rules.js";
 
@@ -32,6 +33,7 @@ function normalizeText(value: string): string {
 }
 
 export function asksMetalThreadPasteJoint(text: string): boolean {
+  if (isBuildingSurfaceSealingContext(text)) return false;
   const q = normalizeText(text);
   return (
     /\b(pate|pâte)\s+[aà]\s+joint\b/.test(q) ||

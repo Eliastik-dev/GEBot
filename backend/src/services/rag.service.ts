@@ -129,6 +129,10 @@ const THEME_SEARCH_EXPANSIONS: Record<ProductTheme, Array<{ pattern: RegExp; ter
   ],
   batiment: [
     {
+      pattern: /\b(carrelage|terrasse|balcon|dalle|joint\s+exterieur)\b/i,
+      terms: ["exthane", "exthane colle et joint", "joint carrelage exterieur", "mastic colle joint"],
+    },
+    {
       pattern: /\b(facade|fissure|mur|toiture)\b/i,
       terms: ["mastic acrylique", "etancheite facade", "joint batiment"],
     },
