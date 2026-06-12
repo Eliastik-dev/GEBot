@@ -81,8 +81,36 @@ warn_port_conflict() {
   fi
 }
 
+wait_for_port_free() {
+  local port="$1"
+  local max_wait="${2:-15}"
+  local attempt
+  for ((attempt = 1; attempt <= max_wait; attempt++)); do
+    [[ -z "$(port_listener_pid "${port}")" ]] && return 0
+    sleep 1
+  done
+  return 1
+}
+
+kill_backend_listener_pid() {
+  local port="$1"
+  local owner_pid="$2"
+  local reason="$3"
+  warn "Stopping GEBot backend on port ${port} (${reason}, PID ${owner_pid})."
+  kill "${owner_pid}" 2>/dev/null || true
+  if ! wait_for_port_free "${port}" 10; then
+    warn "Process still listening — sending SIGKILL to PID ${owner_pid}."
+    kill -9 "${owner_pid}" 2>/dev/null || true
+    wait_for_port_free "${port}" 5 || true
+  fi
+  if [[ -z "$(port_listener_pid "${port}")" ]]; then
+    log "Port ${port} released."
+  fi
+}
+
 release_stale_backend_listener() {
   local port="$1"
+  local force="${2:-0}"
   local owner_pid owner_app owner_cmd gebot_pid
   owner_pid="$(port_listener_pid "${port}")"
   [[ -n "${owner_pid}" ]] || return 0
@@ -91,21 +119,34 @@ release_stale_backend_listener() {
   owner_app="$(pm2_app_for_pid "${owner_pid}" 2>/dev/null || true)"
   gebot_pid="$(pm2 pid "${APP_NAME}" 2>/dev/null || true)"
 
-  # Orphan node process from an old deploy — not tracked by PM2 gebot-backend.
-  if is_gebot_backend_process "${owner_cmd}" && [[ -z "${owner_app}" || "${owner_pid}" != "${gebot_pid}" ]]; then
-    warn "Stopping stale GEBot backend on port ${port} (orphan PID ${owner_pid}, commit likely outdated)."
-    kill "${owner_pid}" 2>/dev/null || true
-    for _ in 1 2 3 4 5; do
-      [[ -z "$(port_listener_pid "${port}")" ]] && break
-      sleep 1
-    done
-    if [[ -n "$(port_listener_pid "${port}")" ]]; then
-      warn "Orphan still listening — sending SIGKILL to PID ${owner_pid}."
-      kill -9 "${owner_pid}" 2>/dev/null || true
-      sleep 1
-    fi
-    log "Port ${port} released."
+  if ! is_gebot_backend_process "${owner_cmd}"; then
+    return 0
   fi
+
+  if [[ "${force}" == "1" ]]; then
+    kill_backend_listener_pid "${port}" "${owner_pid}" "pre-start cleanup"
+    return 0
+  fi
+
+  # Orphan node process from an old deploy — not tracked by PM2 gebot-backend.
+  if [[ -z "${owner_app}" || "${owner_pid}" != "${gebot_pid}" ]]; then
+    kill_backend_listener_pid "${port}" "${owner_pid}" "orphan process"
+  fi
+}
+
+wait_for_health_commit() {
+  local port="$1"
+  local max_attempts="${2:-30}"
+  local attempt commit
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    commit="$(read_health_commit "${port}")"
+    if [[ -n "${commit}" ]]; then
+      echo "${commit}"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -241,25 +282,39 @@ if [[ -n "${RESTART_COUNT}" && "${RESTART_COUNT}" -gt 50 ]]; then
 fi
 
 warn_port_conflict "${BACKEND_PORT}"
-release_stale_backend_listener "${BACKEND_PORT}"
 
 if pm2 describe "${APP_NAME}" >/dev/null 2>&1; then
-  log "Recreating PM2 process '${APP_NAME}' (delete + start)..."
-  pm2 delete "${APP_NAME}"
+  log "Recreating PM2 process '${APP_NAME}' (stop → release port → delete → start)..."
+  pm2 stop "${APP_NAME}" || true
+  wait_for_port_free "${BACKEND_PORT}" 15 || true
+  pm2 delete "${APP_NAME}" || true
+  wait_for_port_free "${BACKEND_PORT}" 10 || true
 else
   log "Starting PM2 process '${APP_NAME}'..."
 fi
+
+release_stale_backend_listener "${BACKEND_PORT}" 1
+if [[ -n "$(port_listener_pid "${BACKEND_PORT}")" ]]; then
+  warn_port_conflict "${BACKEND_PORT}"
+  fail "Port ${BACKEND_PORT} is still in use — cannot start ${APP_NAME}."
+fi
+
 pm2 start ecosystem.config.js
 
 pm2 save
 log "PM2 process list saved."
 
-log "Waiting for backend to accept connections on port ${BACKEND_PORT}..."
-sleep 3
-RUNNING_COMMIT="$(read_health_commit "${BACKEND_PORT}")"
+log "Waiting for backend /health on port ${BACKEND_PORT} (up to 30s)..."
+RUNNING_COMMIT="$(wait_for_health_commit "${BACKEND_PORT}" 30 || true)"
 if [[ -z "${RUNNING_COMMIT}" ]]; then
   warn_port_conflict "${BACKEND_PORT}"
-  fail "Backend /health unreachable after PM2 start — check: pm2 logs ${APP_NAME} --lines 50"
+  echo ""
+  echo "  pm2 status"
+  pm2 status "${APP_NAME}" 2>/dev/null || true
+  echo ""
+  echo "  Recent logs:"
+  pm2 logs "${APP_NAME}" --lines 30 --nostream 2>/dev/null || true
+  fail "Backend /health unreachable after PM2 start — see logs above."
 fi
 if [[ "${RUNNING_COMMIT}" != "${DEPLOY_COMMIT}" ]]; then
   warn_port_conflict "${BACKEND_PORT}"
