@@ -35,25 +35,43 @@ function buildAllowedOrigins(): Set<string> {
 
 const allowedOrigins = buildAllowedOrigins();
 
-export const corsMiddleware: RequestHandler = cors({
-  origin(origin, callback) {
-    if (!origin) {
-      callback(null, true);
-      return;
-    }
-    const normalized = origin.replace(/\/$/, "");
-    if (allowedOrigins.has(normalized)) {
-      callback(null, true);
-      return;
-    }
-    callback(new Error(`CORS blocked for origin: ${origin}`));
-  },
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "X-Session-Id"],
-  exposedHeaders: ["Content-Type"],
-  maxAge: 86_400,
-  credentials: false,
-});
+function isSameProxyHost(origin: string, requestHost: string | undefined): boolean {
+  if (!requestHost) return false;
+  try {
+    const originUrl = new URL(origin);
+    const [hostName] = requestHost.toLowerCase().split(":");
+    return originUrl.hostname.toLowerCase() === hostName;
+  } catch {
+    return false;
+  }
+}
+
+/** CORS with same-vhost bypass (widget + /api on one Nginx server_name). */
+export const corsMiddleware: RequestHandler = (req, res, next) => {
+  cors({
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      const normalized = origin.replace(/\/$/, "");
+      if (allowedOrigins.has(normalized)) {
+        callback(null, true);
+        return;
+      }
+      if (isSameProxyHost(normalized, req.headers.host)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "X-Session-Id"],
+    exposedHeaders: ["Content-Type"],
+    maxAge: 86_400,
+    credentials: false,
+  })(req, res, next);
+};
 
 export const helmetMiddleware: RequestHandler = helmet({
   contentSecurityPolicy: false,
