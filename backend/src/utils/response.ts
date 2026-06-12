@@ -299,7 +299,60 @@ export function isResellerIntent(message: string): boolean {
 type DirectProductReplyContext = {
   sessionAudience?: Audience | null;
   sessionTheme?: ProductTheme | null;
+  /** Réponse après 👎 + produit attendu — pas de « Oui, catalogue ». */
+  feedbackCorrection?: boolean;
 };
+
+function sanitizeCatalogSummary(raw: string | null | undefined, locale: Locale): string {
+  let s = decodeHtmlEntities(raw ?? "").trim();
+  s = s.replace(/^[^.]+\(synthèse heuristique[^)]*\)\.\s*/i, "");
+  s = s.replace(/^[^.]+\(synthèse heuristique[^)]*\)\s*/i, "");
+  s = s.replace(/GEB SAS[\s\S]*?www\.geb\.fr\s*/gi, "");
+  s = s.replace(/T[ée]l\s*:[\s\S]*?Fax\s*:[\s\S]*?geb\.fr\s*/gi, "");
+  s = s.replace(/E-Labo-\d+/gi, "");
+  s = s.replace(/Fiche Technique[\s\S]*?Version\s*:\s*\d+/gi, "");
+  s = s.replace(/page\s+\d+\s+sur\s+\d+/gi, "");
+  s = s.replace(/\s+/g, " ").trim();
+  if (s.length > 280) {
+    const cut = s.slice(0, 280);
+    const lastPeriod = cut.lastIndexOf(".");
+    s = lastPeriod > 100 ? cut.slice(0, lastPeriod + 1) : `${cut.trimEnd()}…`;
+  }
+  return s || catalogSummaryFallback(locale);
+}
+
+function formatProductUtilisationLine(product: ProductKnowledgeRow, locale: Locale): string {
+  const fallback =
+    locale === "en"
+      ? "Not specified in the sheet."
+      : locale === "nl"
+        ? "Niet vermeld in de fiche."
+        : locale === "pl"
+          ? "Nie podano w karcie."
+          : "Non précisé dans la fiche.";
+  const apps = Array.isArray(product.applications) ? product.applications : [];
+  if (apps.length > 0) {
+    return apps
+      .slice(0, 2)
+      .map((app) => `${app.context}: ${app.description}${app.constraints ? ` (${app.constraints})` : ""}`)
+      .join(" ; ");
+  }
+  const parts = [product.supports?.trim(), product.curing_time?.trim()].filter(Boolean);
+  return parts.length > 0 ? parts.join(" — ") : fallback;
+}
+
+function directCitedIntro(locale: Locale, name: string, mismatch: string, ctx?: DirectProductReplyContext): string {
+  if (ctx?.feedbackCorrection) {
+    if (locale === "en") return `Here is the GEB catalogue product that fits your need.`;
+    if (locale === "nl") return `Hier is het GEB-catalogusproduct dat bij uw vraag past.`;
+    if (locale === "pl") return `Oto produkt z katalogu GEB odpowiadajacy na Pana/Pani potrzebe.`;
+    return `Voici le produit GEB du catalogue adapte a votre besoin.`;
+  }
+  if (locale === "en") return `Yes — **${name}** is in the GEB catalogue.${mismatch}`;
+  if (locale === "nl") return `Ja — **${name}** staat in de GEB-catalogus.${mismatch}`;
+  if (locale === "pl") return `Tak — **${name}** jest w katalogu GEB.${mismatch}`;
+  return `Oui — **${name}** fait partie du catalogue GEB.${mismatch}`;
+}
 
 function directProductMismatchNote(locale: Locale, product: ProductKnowledgeRow, ctx?: DirectProductReplyContext): string {
   if (!ctx?.sessionAudience && !ctx?.sessionTheme) return "";
@@ -324,15 +377,8 @@ export function buildDirectTechnicalSheetReply(
   ctx?: DirectProductReplyContext,
 ): string {
   const name = decodeHtmlEntities(product.canonical_name).trim();
-  const summary =
-    product.summary_technical?.trim() ||
-    (locale === "en"
-      ? "GEB catalogue product."
-      : locale === "nl"
-        ? "GEB-catalogusproduct."
-        : locale === "pl"
-          ? "Produkt z katalogu GEB."
-          : "Produit du catalogue GEB.");
+  const summary = sanitizeCatalogSummary(product.summary_technical, locale);
+  const utilisation = formatProductUtilisationLine(product, locale);
   const ftLine = product.ft_url
     ? `- [Fiche Technique](${product.ft_url})`
     : locale === "en"
@@ -351,6 +397,7 @@ export function buildDirectTechnicalSheetReply(
 
 ### 📦 Recommended Product: **${name}**
 - **Description:** ${summary}
+- **Utilisation / Application:** ${utilisation}
 
 ### 📄 Official Documentation
 ${ftLine}
@@ -361,6 +408,7 @@ ${fdsLine}`;
 
 ### 📦 Aanbevolen product: **${name}**
 - **Beschrijving:** ${summary}
+- **Utilisation / Application:** ${utilisation}
 
 ### 📄 Officiële documentatie
 ${ftLine}
@@ -371,6 +419,7 @@ ${fdsLine}`;
 
 ### 📦 Rekomendowany produkt: **${name}**
 - **Opis:** ${summary}
+- **Utilisation / Application:** ${utilisation}
 
 ### 📄 Dokumentacja oficialna
 ${ftLine}
@@ -381,6 +430,7 @@ ${fdsLine}`;
 
 ### 📦 Produit Recommandé : **${name}**
 - **Description :** ${summary}
+- **Utilisation / Application :** ${utilisation}
 
 ### 📄 Documentation Officielle
 ${ftLine}
@@ -415,46 +465,52 @@ export function buildDirectCitedProductReply(
   ctx?: DirectProductReplyContext,
 ): string {
   const name = decodeHtmlEntities(product.canonical_name).trim();
-  const summary = product.summary_technical?.trim() || catalogSummaryFallback(locale);
+  const summary = sanitizeCatalogSummary(product.summary_technical, locale);
+  const utilisation = formatProductUtilisationLine(product, locale);
   const { ftLine, fdsLine } = documentationLines(locale, product);
 
   const mismatch = directProductMismatchNote(locale, product, ctx);
+  const intro = directCitedIntro(locale, name, mismatch, ctx);
 
   if (locale === "en") {
-    return `Yes — **${name}** is in the GEB catalogue.${mismatch}
+    return `${intro}
 
 ### 📦 Recommended Product: **${name}**
 - **Description:** ${summary}
+- **Utilisation / Application:** ${utilisation}
 
 ### 📄 Official Documentation
 ${ftLine}
 ${fdsLine}`;
   }
   if (locale === "nl") {
-    return `Ja — **${name}** staat in de GEB-catalogus.${mismatch}
+    return `${intro}
 
 ### 📦 Aanbevolen product: **${name}**
 - **Beschrijving:** ${summary}
+- **Utilisation / Application:** ${utilisation}
 
 ### 📄 Officiële documentatie
 ${ftLine}
 ${fdsLine}`;
   }
   if (locale === "pl") {
-    return `Tak — **${name}** jest w katalogu GEB.${mismatch}
+    return `${intro}
 
 ### 📦 Rekomendowany produkt: **${name}**
 - **Opis:** ${summary}
+- **Utilisation / Application:** ${utilisation}
 
 ### 📄 Dokumentacja oficialna
 ${ftLine}
 ${fdsLine}`;
   }
 
-  return `Oui — **${name}** fait partie du catalogue GEB.${mismatch}
+  return `${intro}
 
 ### 📦 Produit Recommandé : **${name}**
 - **Description :** ${summary}
+- **Utilisation / Application :** ${utilisation}
 
 ### 📄 Documentation Officielle
 ${ftLine}

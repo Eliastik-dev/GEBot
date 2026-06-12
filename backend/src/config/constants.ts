@@ -42,7 +42,7 @@ export const RESELLER_CACHE_TTL_MS = 15 * 60 * 1000;
 export const GEO_TIMEOUT_MS = 1500;
 export const AMAZON_LINKS_BY_LOCALE = loadAmazonLinksFromWorkbook(env.AMAZON_LINKS_XLSX_PATH);
 export const RESELLER_DIRECTORY_URL = "https://www.geb.fr/revendeurs";
-export const ANSWER_CACHE_VERSION = "v5_8_building_surface_sealing";
+export const ANSWER_CACHE_VERSION = "v5_9_cited_product_format";
 
 export const COMPLEMENTARY_HINTS: Array<{
   id: string;

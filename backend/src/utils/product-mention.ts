@@ -290,7 +290,11 @@ export function computeExplicitProductMatchScore(product: ProductKnowledgeRow, t
       if (!text || text.length < 2) continue;
 
       const slugForm = text.replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-      if (slugForm.length >= 4 && slug.includes(slugForm)) {
+      if (slugForm.length >= 6 && slug === slugForm) {
+        best = Math.max(best, 78);
+      } else if (slugForm.length >= 6 && slug.startsWith(slugForm)) {
+        best = Math.max(best, 72);
+      } else if (slugForm.length >= 4 && slug.includes(slugForm)) {
         best = Math.max(best, 62);
       } else if (slugForm.length >= 4 && slug.length >= 10 && slugForm.includes(slug)) {
         best = Math.max(best, 58);

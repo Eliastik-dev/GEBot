@@ -4,6 +4,7 @@
 
 import type { StoredMessage } from "../types/index.js";
 import { isProfileOnlyMessage, isThemeOnlyMessage } from "./locale.js";
+import { mentionsLikelyProductPhrase } from "./product-mention.js";
 import { isYesNoAnswer } from "./response.js";
 
 export type StoredMessageWithFeedback = StoredMessage & {
@@ -78,4 +79,13 @@ export function resolveFeedbackProductCorrectionContext(
     : [];
 
   return { trainingQuery, dislikedProductSlugs };
+}
+
+/** Message court citant un produit → ne pas diluer avec tout l'historique pour le matching catalogue. */
+export function resolveProductCitationQuery(currentMessage: string, enrichedQuery: string): string {
+  const msg = currentMessage.trim();
+  if (msg.length > 0 && msg.length <= 100 && mentionsLikelyProductPhrase(msg)) {
+    return msg;
+  }
+  return enrichedQuery.trim() || msg;
 }

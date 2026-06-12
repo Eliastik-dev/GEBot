@@ -42,7 +42,7 @@ export type DirectSheetTurnContext = {
   buildReply?: (
     locale: Locale,
     product: ProductKnowledgeRow,
-    ctx?: { sessionAudience?: Audience | null; sessionTheme?: ProductTheme | null },
+    ctx?: { sessionAudience?: Audience | null; sessionTheme?: ProductTheme | null; feedbackCorrection?: boolean },
   ) => string;
   sessionTheme?: ProductTheme | null;
   logStatus?: "direct_technical_sheet" | "direct_cited_product";
@@ -55,6 +55,7 @@ export async function deliverDirectTechnicalSheetTurn(ctx: DirectSheetTurnContex
   let answer = buildReply(ctx.locale, ctx.product, {
     sessionAudience: ctx.audience,
     sessionTheme: ctx.sessionTheme ?? null,
+    feedbackCorrection: Boolean(ctx.trainingQuery),
   });
   sseWrite(ctx.res, { delta: answer, sessionId: ctx.sessionId, audience: ctx.audience }, "chunk");
 

@@ -48,7 +48,7 @@ import type { Audience, ChatRequestBody, Locale, ProductTheme, Reseller } from "
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { fireAndForget, withTimeout } from "../utils/async.js";
 import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection } from "../utils/amazon.js";
-import { resolveFeedbackProductCorrectionContext } from "../utils/feedback-correction.js";
+import { resolveFeedbackProductCorrectionContext, resolveProductCitationQuery } from "../utils/feedback-correction.js";
 import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, normalizeAudience, normalizeLocale } from "../utils/locale.js";
 import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectCitedProductReply, buildDirectTechnicalSheetReply, buildEscalationSection, buildHandoff, buildPurchaseAvailabilityIntro, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
 import {
@@ -623,11 +623,17 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         env.PRODUCT_KNOWLEDGE_ENABLED &&
         catalogSizeEarly > 0
       ) {
+        const correctionCitation = await detectCatalogProductCitations({
+          locale: pkLocaleEarly,
+          text: message,
+          audience,
+          limit: 3,
+        });
         const correctionProduct =
-          (hasCatalogCitation ? catalogCitation.best : null) ??
+          correctionCitation.best ??
           (await lookupCitedCatalogProductForRecommendation({
             locale: pkLocaleEarly,
-            userQuery: message,
+            userQuery: resolveProductCitationQuery(message, message),
             audience,
           }));
         if (correctionProduct) {
@@ -712,11 +718,12 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         !isExplicitProductLookupQuery(effectiveQuery) &&
         !isFactualProductQuestion(citationScanText)
       ) {
+        const productCitationQuery = resolveProductCitationQuery(message, queryForRetrieval);
         const citedProductEarly =
-          (hasCatalogCitation ? catalogCitation.best : null) ??
+          (hasCatalogCitation && productCitationQuery === message.trim() ? catalogCitation.best : null) ??
           (await lookupCitedCatalogProductForRecommendation({
             locale: pkLocaleEarly,
-            userQuery: queryForRetrieval,
+            userQuery: productCitationQuery,
             audience,
           }));
         if (citedProductEarly) {
