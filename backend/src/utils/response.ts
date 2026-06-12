@@ -1,7 +1,7 @@
 import { COMPLEMENTARY_HINTS } from "../config/constants.js";
 import type { Audience, HandoffPayload, Locale, ProductTheme, Reseller } from "../types/index.js";
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
-import { formatUserFacingMismatchNote } from "../services/product-theme.service.js";
+import { formatUserFacingMismatchNote, normalizeStoredProductTheme } from "../services/product-theme.service.js";
 import { removeAmazonSections } from "./amazon.js";
 import { detectTheme } from "./locale.js";
 import { decodeHtmlEntities, normalizeText } from "./text.js";
@@ -286,7 +286,12 @@ function directProductMismatchNote(locale: Locale, product: ProductKnowledgeRow,
   const note = formatUserFacingMismatchNote({
     sessionAudience: ctx.sessionAudience,
     sessionTheme: ctx.sessionTheme,
-    product,
+    product: {
+      canonical_name: product.canonical_name,
+      slug: product.slug,
+      audience: product.audience,
+      theme: normalizeStoredProductTheme(product.theme),
+    },
     locale,
   });
   return note ? `\n\n${note}` : "";

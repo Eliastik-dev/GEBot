@@ -1,4 +1,10 @@
+import { VALID_THEMES } from "../config/constants.js";
 import type { Audience, Locale, ProductTheme } from "../types/index.js";
+
+export function normalizeStoredProductTheme(theme: ProductTheme | string | null | undefined): ProductTheme | null {
+  if (!theme) return null;
+  return VALID_THEMES.includes(theme as ProductTheme) ? (theme as ProductTheme) : null;
+}
 
 export type ScrapedProductRow = {
   wp_id: number;
@@ -270,10 +276,10 @@ export function sessionAudienceLabel(audience: Audience, locale: Locale): string
 
 /** LLM-facing hints when a product is outside the session catalogue line or domain. */
 export function buildCatalogMismatchHints(input: {
-  sessionAudience?: Audience | null;
-  sessionTheme?: ProductTheme | null;
+  sessionAudience?: Audience | null | undefined;
+  sessionTheme?: ProductTheme | null | undefined;
   product: { canonical_name: string; slug: string; audience?: string | null; theme?: ProductTheme | null };
-  locale?: Locale;
+  locale?: Locale | undefined;
 }): string[] {
   const locale = input.locale ?? "fr";
   const hints: string[] = [];
@@ -330,8 +336,8 @@ export function buildCatalogMismatchHints(input: {
 
 /** Short disclaimer for deterministic MODE 2 replies (direct sheet / cited product). */
 export function formatUserFacingMismatchNote(input: {
-  sessionAudience?: Audience | null;
-  sessionTheme?: ProductTheme | null;
+  sessionAudience?: Audience | null | undefined;
+  sessionTheme?: ProductTheme | null | undefined;
   product: { canonical_name: string; slug: string; audience?: string | null; theme?: ProductTheme | null };
   locale: Locale;
 }): string {

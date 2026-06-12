@@ -19,7 +19,11 @@ import {
 } from "../utils/joint-paste.js";
 import { searchProductKnowledge } from "./product-knowledge.service.js";
 import type { FeedbackSlugAdjustments } from "./feedback-retrieval.service.js";
-import { buildCatalogMismatchHints, inferCatalogProductAudience } from "./product-theme.service.js";
+import {
+  buildCatalogMismatchHints,
+  inferCatalogProductAudience,
+  normalizeStoredProductTheme,
+} from "./product-theme.service.js";
 
 export type ProductRouterInput = {
   locale: string;
@@ -226,7 +230,7 @@ export function formatProductKnowledgeContext(
           canonical_name: product.canonical_name,
           slug: product.slug,
           audience: product.audience,
-          theme: (product.theme as ProductTheme | null) ?? null,
+          theme: normalizeStoredProductTheme(product.theme),
         },
         locale: renderContext.locale,
       })
