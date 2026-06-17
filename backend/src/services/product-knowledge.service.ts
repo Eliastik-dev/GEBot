@@ -15,6 +15,7 @@ import {
 } from "./feedback-retrieval.service.js";
 import { catalogAudienceVisibleForSession, inferCatalogProductAudience } from "./product-theme.service.js";
 import { decodeHtmlEntities } from "../utils/text.js";
+import { isThemeUncertaintyMessage } from "../utils/locale.js";
 import {
   collectCatalogSearchTerms,
   computeExplicitProductMatchScore,
@@ -873,6 +874,9 @@ export async function detectCatalogProductCitations(input: {
   limit?: number;
   minScore?: number;
 }): Promise<CatalogCitationResult> {
+  if (isThemeUncertaintyMessage(input.text)) {
+    return { products: [], best: null, bestScore: 0 };
+  }
   const texts = [input.text];
   const minScore = input.minScore ?? CITED_PRODUCT_MATCH_MIN;
   const terms = collectCatalogSearchTerms(input.text);
@@ -962,6 +966,7 @@ export async function lookupCitedCatalogProductForRecommendation(input: {
   audience?: Audience | null;
 }): Promise<ProductKnowledgeRow | null> {
   if (isExplicitProductLookupQuery(input.userQuery)) return null;
+  if (isThemeUncertaintyMessage(input.userQuery)) return null;
 
   const byExplicitPattern = await fetchExplicitCatalogProducts(input.locale, input.userQuery);
   if (byExplicitPattern.length > 0) return byExplicitPattern[0] ?? null;

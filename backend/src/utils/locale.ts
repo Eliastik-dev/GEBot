@@ -68,6 +68,36 @@ export function isThemeOnlyMessage(message: string): boolean {
   return words <= 3;
 }
 
+/** User does not know which theme/domain applies (onboarding — not a product citation). */
+export function isThemeUncertaintyMessage(message: string): boolean {
+  const m = message
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (detectTheme(message)) return false;
+  if (isProfileOnlyMessage(message)) return false;
+  return (
+    /\b(je ne sais pas|je sais pas|pas sur|pas certain|aucune idee|aucun idee|je ne connais pas|je connais pas|sais pas|no idea|dont know|not sure|geen idee|nie wiem)\b/.test(
+      m,
+    ) ||
+    /\b(pas de domaine|quel domaine|unknown domain|geen domein)\b/.test(m)
+  );
+}
+
+export function buildThemeUncertaintyReply(locale: Locale): string {
+  if (locale === "en") {
+    return "No problem — pick the closest area below, or briefly describe your situation (leak, joint, heating, pool…) and I will guide you.";
+  }
+  if (locale === "nl") {
+    return "Geen probleem — kies hieronder het dichtstbijzijnde domein, of beschrijf kort uw situatie (lek, voeg, verwarming, zwembad…) en ik help u verder.";
+  }
+  if (locale === "pl") {
+    return "Nie ma problemu — wybierz najblizszy obszar ponizej albo krotko opisz sytuacje (wyciek, fuga, ogrzewanie, basen…), a ja Panu/Pani doradze.";
+  }
+  return "Pas de souci — choisissez le domaine le plus proche ci-dessous, ou décrivez brièvement votre situation (fuite, joint, chauffage, piscine…) et je vous orienterai.";
+}
+
 
 export function getSpecificClarification(message: string, locale: Locale): string | null {
   const normalized = message.trim().toLowerCase();

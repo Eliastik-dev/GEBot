@@ -1,4 +1,5 @@
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
+import { isThemeUncertaintyMessage } from "./locale.js";
 import { decodeHtmlEntities } from "./text.js";
 export const EXPLICIT_PRODUCT_MATCH_MIN = 40;
 /** Score needed to reorder results purely by product-name match (avoids weak partial hits). */
@@ -59,6 +60,15 @@ const MENTION_STOP_WORDS = new Set([
   "utilisation",
   "professionnel",
   "particulier",
+  "domaine",
+  "probleme",
+  "situe",
+  "sais",
+  "sait",
+  "connait",
+  "connais",
+  "connaisse",
+  "idee",
 ]);
 
 const SHORT_MENTION_TOKENS = new Set(["abs", "pvc", "ppr", "pe", "pp", "dn", "ms", "rt1", "60"]);
@@ -220,6 +230,7 @@ export function sanitizeIlikeSearchTerm(term: string): string | null {
 
 /** All terms used to fuzzy-search the catalogue — no product whitelist. */
 export function collectCatalogSearchTerms(text: string): string[] {
+  if (isThemeUncertaintyMessage(text)) return [];
   const terms = new Set<string>();
   for (const t of extractProductSearchTerms([text])) terms.add(t);
   for (const t of extractCitedProductSearchTerms(text)) terms.add(t);
@@ -241,6 +252,7 @@ export function collectCatalogSearchTerms(text: string): string[] {
 
 /** Heuristic: user may be naming a catalogue product (sync — DB match confirms via detectCatalogProductCitations). */
 export function mentionsLikelyProductPhrase(text: string): boolean {
+  if (isThemeUncertaintyMessage(text)) return false;
   if (extractCatalogProductCodes(text).length > 0) return true;
   const q = normalizeProductMentionText(text);
   if (CATALOG_PRODUCT_FAMILY_RE.test(q)) return true;

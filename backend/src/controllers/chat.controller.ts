@@ -50,8 +50,8 @@ import type { Audience, ChatRequestBody, Locale, ProductTheme, Reseller } from "
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { fireAndForget, withTimeout } from "../utils/async.js";
 import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection } from "../utils/amazon.js";
-import { resolveFeedbackProductCorrectionContext, resolveProductCitationQuery } from "../utils/feedback-correction.js";
-import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, normalizeAudience, normalizeLocale } from "../utils/locale.js";
+import { resolveFeedbackProductCorrectionContext, resolveProductCitationQuery, buildUserCitationScanText } from "../utils/feedback-correction.js";
+import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, isThemeUncertaintyMessage, buildThemeUncertaintyReply, normalizeAudience, normalizeLocale } from "../utils/locale.js";
 import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectCitedProductReply, buildDirectTechnicalSheetReply, buildEscalationSection, buildHandoff, buildPurchaseAvailabilityIntro, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
 import {
   getLastDiscussedProductFromHistory,
@@ -61,6 +61,8 @@ import {
 } from "../utils/conversation-context.js";
 import {
   EXPLICIT_PRODUCT_MATCH_MIN,
+  computeExplicitProductMatchScore,
+  EXPLICIT_PRODUCT_NAME_PRIORITY_MIN,
   formatNamedProductCitationPrompt,
   hasNamedProductCitation,
   isExplicitProductLookupQuery,
@@ -365,6 +367,28 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         return;
       }
 
+      if (isThemeUncertaintyMessage(message) && !effectiveTheme) {
+        const reply = buildThemeUncertaintyReply(locale);
+        startSse(res);
+        sseWrite(res, { delta: reply, sessionId, audience, showThemeReplies: true }, "chunk");
+        await saveMessage(sessionId, "assistant", reply);
+        fireAndForget(
+          logQuery({
+            sessionId,
+            locale,
+            audience,
+            fluidType: fluidHint,
+            query: message,
+            responseMs: Date.now() - startedAt,
+            status: "theme_uncertainty",
+          }),
+          "logQuery.theme_uncertainty",
+        );
+        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        res.end();
+        return;
+      }
+
       const specificClarification = getSpecificClarification(message, locale);
       if (specificClarification) {
         console.log("[/api/chat] specific_clarification", { sessionId, message });
@@ -422,6 +446,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
 
       // ── ML-based Intent & Metadata Extraction (replaces legacy regex gates) ──
       const preAnalysisTranscript = buildPreAnalysisTranscript(historyMessages, message);
+      const userCitationScanText = buildUserCitationScanText(historyMessages, message);
       const citationScanText = `${preAnalysisTranscript}\n${message}`;
       const diagnosticResult: DiagnosticAnalysis = await runDiagnosticAnalysis(
         preAnalysisTranscript,
@@ -529,7 +554,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         env.PRODUCT_KNOWLEDGE_ENABLED && catalogSizeEarly > 0
           ? await detectCatalogProductCitations({
               locale: pkLocaleEarly,
-              text: citationScanText,
+              text: userCitationScanText,
               audience,
               limit: env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS,
             }).catch(() => ({ products: [], best: null, bestScore: 0 }))
@@ -766,11 +791,19 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         env.PRODUCT_KNOWLEDGE_ENABLED &&
         catalogSizeEarly > 0 &&
         !isExplicitProductLookupQuery(effectiveQuery) &&
-        !isFactualProductQuestion(citationScanText)
+        !isFactualProductQuestion(citationScanText) &&
+        !isThemeUncertaintyMessage(message)
       ) {
         const productCitationQuery = resolveProductCitationQuery(message, queryForRetrieval);
+        const strongUserProductCitation =
+          hasCatalogCitation &&
+          catalogCitation.best != null &&
+          computeExplicitProductMatchScore(catalogCitation.best, [message]) >=
+            EXPLICIT_PRODUCT_NAME_PRIORITY_MIN;
         const citedProductEarly =
-          (hasCatalogCitation && productCitationQuery === message.trim() ? catalogCitation.best : null) ??
+          (strongUserProductCitation && productCitationQuery === message.trim()
+            ? catalogCitation.best
+            : null) ??
           (await lookupCitedCatalogProductForRecommendation({
             locale: pkLocaleEarly,
             userQuery: productCitationQuery,

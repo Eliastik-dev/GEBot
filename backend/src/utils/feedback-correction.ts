@@ -3,7 +3,7 @@
  */
 
 import type { StoredMessage } from "../types/index.js";
-import { isProfileOnlyMessage, isThemeOnlyMessage } from "./locale.js";
+import { isProfileOnlyMessage, isThemeOnlyMessage, isThemeUncertaintyMessage } from "./locale.js";
 import { mentionsLikelyProductPhrase } from "./product-mention.js";
 import { isYesNoAnswer } from "./response.js";
 
@@ -84,8 +84,20 @@ export function resolveFeedbackProductCorrectionContext(
 /** Message court citant un produit → ne pas diluer avec tout l'historique pour le matching catalogue. */
 export function resolveProductCitationQuery(currentMessage: string, enrichedQuery: string): string {
   const msg = currentMessage.trim();
+  if (isThemeUncertaintyMessage(msg)) return msg;
   if (msg.length > 0 && msg.length <= 100 && mentionsLikelyProductPhrase(msg)) {
     return msg;
   }
   return enrichedQuery.trim() || msg;
+}
+
+/** User turns only — avoids false catalogue hits from assistant onboarding prompts (« domaine », etc.). */
+export function buildUserCitationScanText(history: StoredMessage[], message: string): string {
+  const parts = history
+    .filter((row) => row.role === "user")
+    .map((row) => row.content.trim())
+    .filter(Boolean);
+  const current = message.trim();
+  if (current) parts.push(current);
+  return parts.join("\n");
 }
