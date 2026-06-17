@@ -24,6 +24,7 @@ import {
   extractProductSearchTerms,
   sanitizeIlikeSearchTerm,
   isExplicitProductLookupQuery,
+  isExplicitProductTargeted,
   isFactualProductQuestion,
   matchesCatalogCodeTerm,
   EXPLICIT_PRODUCT_NAME_PRIORITY_MIN,
@@ -117,8 +118,17 @@ function scoreProduct(
   explicitTexts: string[] = [],
 ): number {
   let score = 0;
+  const explicitScore = computeExplicitProductMatchScore(product, explicitTexts);
   if (sessionTheme && product.theme === sessionTheme) score += 6;
-  if (sessionTheme && product.theme && product.theme !== sessionTheme) score -= 20;
+  else if (sessionTheme && product.theme && product.theme !== sessionTheme) {
+    if (explicitScore >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN) {
+      // Named product lookup — cross-theme is expected; no mismatch penalty.
+    } else if (explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN) {
+      score -= 4;
+    } else {
+      score -= 20;
+    }
+  }
   const productTags = new Set(product.use_case_tags.map((t) => normalizeText(t)));
   for (const tag of tags) {
     if (productTags.has(normalizeText(tag))) score += 3;
@@ -236,7 +246,6 @@ function scoreProduct(
     if (/\buniversel\b/.test(q) && (slug.includes("g110") || title.includes("universel"))) score += 18;
   }
 
-  const explicitScore = computeExplicitProductMatchScore(product, explicitTexts);
   if (explicitScore >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN) score += explicitScore;
   else if (explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN) score += Math.round(explicitScore * 0.35);
 
@@ -567,10 +576,11 @@ async function fetchCandidates(
   locale: "fr" | "nl" | "pl",
   theme: ProductTheme | null | undefined,
   tags: string[],
+  options?: { skipThemeHardFilter?: boolean },
 ): Promise<ProductKnowledgeRow[]> {
   let query = supabase.from("product_knowledge").select("*").eq("locale", locale);
 
-  if (theme) {
+  if (theme && !options?.skipThemeHardFilter) {
     query = query.eq("theme", theme);
   }
   if (tags.length > 0) {
@@ -590,9 +600,11 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
   const limit = input.limit ?? 3;
   const queryText = combineRetrievalText(input);
   const explicitTexts = explicitMatchTexts(input);
+  const skipThemeHardFilter = isExplicitProductTargeted(explicitTexts);
 
-  const byTags = await fetchCandidates(input.locale, input.theme, tags);
-  const byTagsWithoutTheme = input.theme != null ? await fetchCandidates(input.locale, null, tags) : [];
+  const byTags = await fetchCandidates(input.locale, input.theme, tags, { skipThemeHardFilter });
+  const byTagsWithoutTheme =
+    input.theme != null && !skipThemeHardFilter ? await fetchCandidates(input.locale, null, tags) : [];
 
   const nameTerms = extractNameSearchTerms(queryText, tags, input.audience);
   const byName = await fetchByNameTerms(input.locale, nameTerms);

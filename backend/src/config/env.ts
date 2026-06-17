@@ -46,8 +46,8 @@ export const env = {
   QUERY_CACHE_TTL_MS: Number(process.env.QUERY_CACHE_TTL_MS ?? "120000"),
   MISTRAL_CHAT_MODEL: process.env.MISTRAL_CHAT_MODEL ?? "mistral-small-latest",
   MISTRAL_CHAT_FALLBACK_MODELS: process.env.MISTRAL_CHAT_FALLBACK_MODELS ?? "",
-  /** Cap generation length (concise answers). */
-  MISTRAL_CHAT_MAX_TOKENS: Number(process.env.MISTRAL_CHAT_MAX_TOKENS ?? "720"),
+  /** Cap generation length (MODE 2 single product; MODE 3 comparison needs more headroom). */
+  MISTRAL_CHAT_MAX_TOKENS: Number(process.env.MISTRAL_CHAT_MAX_TOKENS ?? "1280"),
   MISTRAL_CHAT_MAX_RETRIES: Number(process.env.MISTRAL_CHAT_MAX_RETRIES ?? "3"),
   MISTRAL_CHAT_RETRY_BASE_MS: Number(process.env.MISTRAL_CHAT_RETRY_BASE_MS ?? "1500"),
   AMAZON_STORE_URL: process.env.AMAZON_STORE_URL ?? "https://www.amazon.fr/s?k=GEB",
@@ -57,6 +57,10 @@ export const env = {
   WP_RESELLERS_ENDPOINT: process.env.WP_RESELLERS_ENDPOINT ?? "/wp-json/wp/v2/resellers",
   /** Max structured products injected when product_knowledge route matches. */
   PRODUCT_KNOWLEDGE_MAX_PRODUCTS: Number(process.env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS ?? "3"),
+  /** Path to FAQ/general knowledge JSON for ingestion (default: output/faq-knowledge.json). */
+  FAQ_KNOWLEDGE_JSON_PATH: process.env.FAQ_KNOWLEDGE_JSON_PATH ?? "",
+  /** Min vector similarity to treat an FAQ chunk as a clarification bypass match. */
+  FAQ_MATCH_MIN_SCORE: Number(process.env.FAQ_MATCH_MIN_SCORE ?? "0.38"),
   /** Set to "false" to force legacy vector-only retrieval. */
   PRODUCT_KNOWLEDGE_ENABLED: process.env.PRODUCT_KNOWLEDGE_ENABLED !== "false",
   /**

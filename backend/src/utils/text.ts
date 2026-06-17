@@ -24,11 +24,14 @@ export function normalizeKey(value: string): string {
   return normalizeText(value).replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** Question factuelle (couleurs, teinte, disponibilité…) plutôt qu'une demande de recommandation pure. */
+/** Question factuelle (couleurs, teinte, disponibilité, application…) plutôt qu'une demande de recommandation pure. */
 export function isInformationalProductQuestion(query: string): boolean {
   const q = normalizeText(query);
   return (
     /\b(existe|existe t il|disponible|couleur|couleurs|teint|teinter|teintable|peut on|peut on le|est ce que|est ce qu|est ce|combien|quelle taille|quelle couleur|plusieurs|variante|version|gamme|reference|jaunir|jaunissement|premium|qualite|resiste|resistant|fongicide|durable|odeur|incolore|transparent)\b/.test(
+      q,
+    ) ||
+    /\b(secher|sechage|seche|secs|dry|drying|cure|curing|durcir|durcissement|peindre|peinture|paint|appliquer|application|mode d'emploi|comment utiliser|comment appliquer|how to use|how long|combien de temps|temps de|delai|attendre|wait|faq)\b/.test(
       q,
     ) ||
     isCompatibilitySpecQuestion(query) ||

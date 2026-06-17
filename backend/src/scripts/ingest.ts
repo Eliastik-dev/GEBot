@@ -16,6 +16,11 @@ import { MistralBatchedEmbedding } from "../mistral-batched-embedding.js";
 import { supabase } from "../supabase.js";
 import type { ScrapedProductRow } from "../services/product-theme.service.js";
 import { resolveProductTheme } from "../services/wp-catalog-theme.service.js";
+import {
+  buildFaqDocuments,
+  DEFAULT_FAQ_KNOWLEDGE_PATH,
+  loadFaqKnowledgeEntries,
+} from "../services/faq-knowledge.service.js";
 
 type WpMedia = {
   id: number;
@@ -155,6 +160,31 @@ async function deletePreviousVersions(sourceUrl: string): Promise<void> {
   if (error) throw error;
 }
 
+async function deletePreviousFaqVersions(faqId: string, locale: string): Promise<void> {
+  const { error } = await supabase
+    .from(env.SUPABASE_TABLE)
+    .delete()
+    .contains("metadata", { faq_id: faqId, locale });
+  if (error) throw error;
+}
+
+async function hasCurrentFaqVersion(faqId: string, locale: string, contentHash: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from(env.SUPABASE_TABLE)
+    .select("id, metadata")
+    .contains("metadata", { faq_id: faqId, locale })
+    .limit(20);
+  if (error) throw error;
+  const rows = Array.isArray(data) ? data : [];
+  return rows.some((row) => {
+    const metadata = (row as { metadata?: Record<string, unknown> }).metadata ?? {};
+    const stored =
+      (typeof metadata.content_hash === "string" && metadata.content_hash) ||
+      (typeof metadata.modified_hash === "string" && metadata.modified_hash);
+    return stored === contentHash;
+  });
+}
+
 async function run(): Promise<void> {
   const splitter = new SentenceSplitter({ chunkSize: 1200, chunkOverlap: 120 });
   const embedBatchSize = Number.isFinite(env.MISTRAL_EMBED_BATCH_SIZE)
@@ -177,6 +207,33 @@ async function run(): Promise<void> {
   const docsToIngest: Array<{ doc: Document; sourceUrl: string }> = [];
   let indexedCount = 0;
   let skippedUpToDate = 0;
+  let indexedFaqCount = 0;
+  let skippedFaqUpToDate = 0;
+
+  const faqJsonPath = env.FAQ_KNOWLEDGE_JSON_PATH?.trim() || DEFAULT_FAQ_KNOWLEDGE_PATH;
+  const faqEntries = await loadFaqKnowledgeEntries(faqJsonPath);
+  if (faqEntries.length > 0) {
+    console.log(`Loading FAQ/general knowledge: ${faqJsonPath} (${faqEntries.length} entries)`);
+    for (const item of buildFaqDocuments(faqEntries)) {
+      const entry = item.doc.metadata as Record<string, unknown>;
+      const faqId = String(entry.faq_id ?? "");
+      const locale = String(entry.locale ?? "fr");
+      const contentHash = String(entry.content_hash ?? buildContentHash(item.doc.text));
+      const sourceUrl = String(entry.source_url ?? item.sourceKey);
+
+      const alreadyIndexed = await hasCurrentFaqVersion(faqId, locale, contentHash);
+      if (alreadyIndexed) {
+        skippedFaqUpToDate += 1;
+        continue;
+      }
+      await deletePreviousFaqVersions(faqId, locale);
+      console.log(`Indexing FAQ [${locale}] ${faqId}...`);
+      docsToIngest.push({ doc: item.doc, sourceUrl });
+      indexedFaqCount += 1;
+    }
+  } else {
+    console.log(`No FAQ entries found at ${faqJsonPath} (skipping FAQ ingestion).`);
+  }
 
   if (scrapedRows.length > 0) {
     console.log(`Using scraper output: ${SCRAPE_OUTPUT_PATH} (${scrapedRows.length} rows)`);
@@ -294,7 +351,7 @@ async function run(): Promise<void> {
   }
 
   if (docsToIngest.length === 0) {
-    console.log("No PDF documents extracted from media API.");
+    console.log("No documents to ingest (PDFs or FAQ).");
     return;
   }
 
@@ -320,7 +377,11 @@ async function run(): Promise<void> {
         scrape_rows: scrapedRows.length,
         fetched_media_items: media.length,
         indexed_pdfs: indexedCount,
+        indexed_faq: indexedFaqCount,
         skipped_up_to_date: skippedUpToDate,
+        skipped_faq_up_to_date: skippedFaqUpToDate,
+        faq_json_path: faqJsonPath,
+        faq_entries: faqEntries.length,
         ingested_documents: docsToIngest.length,
         ingested_chunks: totalChunks,
         table: env.SUPABASE_TABLE,

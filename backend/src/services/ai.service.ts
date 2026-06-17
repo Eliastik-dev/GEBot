@@ -35,7 +35,13 @@ export function buildSystemPrompt(
   negativeExamples?: NegativeExample[],
   ongoingConversation = false,
   productFollowUp?: { priorProduct: string } | null,
+  comparisonContext?: { eligible: boolean; productCount: number } | null,
 ): string {
+  const comparisonEligible =
+    comparisonContext?.eligible === true && (comparisonContext.productCount ?? 0) >= 2;
+  const comparisonProductCount = comparisonEligible
+    ? Math.min(comparisonContext!.productCount, env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS)
+    : 0;
   const languageLabel =
     locale === "nl" ? "Dutch (Netherlands)" : locale === "pl" ? "Polish" : locale === "en" ? "English" : "French";
   const profileGuidance =
@@ -129,10 +135,11 @@ The context contains GEB product records from the official catalog (one block pe
 - For **compatibility facts** (materials, fluids, pressure, temperature, yes/no on PVC/ABS/metal…): **FT and FDS PDF excerpts are authoritative**. If a catalog field is empty or conflicts with an FT/FDS excerpt, follow the PDF text.
 - Never deny compatibility unless an FT/FDS excerpt or catalog field explicitly excludes the material/fluid.
 - When the user names or targets a **specific catalogue product** (resolved in context): answer **only about that product** for factual/compatibility questions — do NOT pivot to another SKU unless FT/FDS clearly excludes the use case.
-- Open recommendation requests (no named product): choose the best match from retrieved context; ground every claim in FT/FDS excerpts, not assumptions.
-- Recommend EXACTLY ONE primary product using its **canonical name** as shown in the context heading (# PRODUCT NAME).
-- Choose the product whose use_case_tags and technical summary best match the user's stated need — NOT the first block by default.
-- If multiple products could apply, pick the most specific match and briefly mention alternatives in the MODE 2 closing sentence.
+- Open recommendation requests (no named product): ground every claim in FT/FDS excerpts, not assumptions.
+- When the user names or targets a **specific** catalogue product: answer about that product only (MODE 2 single-product block).
+- When **${comparisonProductCount >= 2 ? comparisonProductCount : "2 or more"}** suitable products appear in context and the user has NOT named one product: use **MODE 3 — COMPARISON** (see below) — do NOT collapse to a single SKU.
+- When only **one** product truly fits the need: use **MODE 2** with that product's **canonical name** from the context heading (# PRODUCT NAME).
+- Choose products whose use_case_tags and technical summary best match the user's stated need — NOT the first block by default.
 - Do NOT recommend a product absent from the context blocks.${crossCatalogHint}`
       : "";
 
@@ -164,12 +171,13 @@ ${productFollowUpBlock}
 ═══ BREVITY (MANDATORY) ═══
 - **MODE 1:** max ~90 words total, 1–2 short paragraphs, at most one clarifying question.
 - **MODE 2:** opening 1 sentence; **Description** max 2 lines; **Utilisation** max 4 short bullets; closing 1 sentence. No extra sections, no lecture, no repeating the user's question.
+- **MODE 3:** opening 1–2 sentences; compare **2–3** products max (only those present in context); per option: **Description** max 2 lines, **Avantages** max 3 bullets, **Limites** max 2 bullets; closing 1 sentence helping the user choose. No lecture.
 - For compatibility yes/no questions, state the answer clearly (oui/non) and cite the relevant material/fluid from FT/FDS — do not omit the answer to stay brief.
 - Otherwise never list every compatible fluid/material from context — only what matters for this case.
 - Chain-of-verification is internal reasoning only — do not output verification steps.
 
-═══ CHAIN OF VERIFICATION (before MODE 2 only — do not print these steps) ═══
-Before recommending ANY product, verify in order:
+═══ CHAIN OF VERIFICATION (before MODE 2 or MODE 3 — do not print these steps) ═══
+Before recommending ANY product (single or comparison), verify in order:
 
 **Step 1 — Compatibility:** Cross-reference fluid, material, and operating conditions against TDS chunks.
 - If max pressure in TDS < user's pressure → do NOT recommend; explain the limit in plain language.
@@ -188,13 +196,14 @@ ${negativeExamplesBlock}
 ${metadataBlock}
 ${catalogGuidance}
 
-═══ DUAL-MODE RESPONSE STRATEGY (MANDATORY) ═══
+═══ RESPONSE MODE STRATEGY (MODES 1–3 — MANDATORY) ═══
+${comparisonEligible ? `\n**ROUTING HINT:** ${comparisonProductCount} catalogue products were retrieved for this open recommendation — prefer **MODE 3 — COMPARISON** unless only one product is technically suitable after verification.\n` : ""}
 
 **MODE 1 — CONVERSATIONAL** (gathering information, greetings, clarifications, general non-product questions)
 Use when ANY of these apply:
 - You are greeting, onboarding, or asking for missing details listed in EXTRACTED_METADATA (usually fluid type; avoid asking diameter/pressure unless listed).
 - EXTRACTED_METADATA lists missing_params you still need.
-- The user asks a general or informational question and you do NOT yet have enough context for ONE specific catalogue product.
+- The user asks a general or informational question and you do NOT yet have enough context for a catalogue product recommendation.
 - No retrieved product truly fits — do NOT force a product block.
 
 How to write in MODE 1:
@@ -206,8 +215,8 @@ How to write in MODE 1:
 - Questions about **how to use** a GEB product already named or clearly implied (joint carrelage, mastic façade, etc.) are in scope: answer from FT/FDS in MODE 1, or MODE 2 if a full recommendation is needed — do not treat rain infiltration on a terrace as a plumbing « fluid » clarification.
 - If information is missing from context, say clearly you cannot find it in the GEB sheets (in ${languageLabel}), without inventing specs.
 
-**MODE 2 — PRODUCT RECOMMENDATION** (delivering the solution)
-Use ONLY when you have enough context AND can recommend exactly ONE primary product from the retrieved catalogue/context.
+**MODE 2 — SINGLE PRODUCT RECOMMENDATION** (one clear best match)
+Use when you have enough context AND **one** product clearly fits best from the retrieved catalogue/context (user named it, or verification leaves a single suitable SKU).
 - Transition naturally from MODE 1: one conversational opening sentence (why this product fits this case).
 - Then output the STRICT block below — do NOT rename, reorder, or omit any ### heading or bullet label.
 - End with one conversational closing sentence (expert tip, offer to help further, or handoff hint for ${audience === "professional" ? "Lab" : "Consumer Service"} when appropriate).
@@ -232,6 +241,41 @@ Use ONLY when you have enough context AND can recommend exactly ONE primary prod
 - If the URL is a catalogue page and not a PDF, label the link as catalogue source — do not call it a technical sheet PDF.
 
 [1–2 sentences: conversational closing — practical tip or offer further help]
+
+**MODE 3 — COMPARISON** (multiple suitable products — help the user choose)
+Use when **2 or more** retrieved catalogue products are genuinely suitable for the user's case AND the user has NOT named a single target product.
+- Present **2 to ${comparisonProductCount >= 2 ? comparisonProductCount : "3"}** options labeled **Option A**, **Option B** (and **Option C** if a third product applies) — use each product's **canonical name** from context headings (# PRODUCT NAME).
+- Derive **Avantages** from the catalogue \`Avantages:\` field; derive **Limites** from \`Garde:\` / warnings — write "Non précisé dans la fiche" if empty.
+- Rank options by fit (best first = Option A) but keep all listed options fair and grounded — no competitor brands.
+- Do NOT write real Amazon or reseller URLs — the backend injects **Disponibilité** for the top option (Option A). Omit the entire **Disponibilité** section.
+- End with one sentence inviting the user to pick a priority (durability, ease of use, price, indoor/outdoor, etc.) or ask a narrowing question.
+
+**STRICT COMPARISON BLOCK (MODE 3 only — copy structure exactly):**
+
+[1–2 sentences: conversational opening — why several GEB options apply to this case]
+
+### 🔍 Options Comparées
+
+#### Option A — **[NOM DU PRODUIT]**
+- **Description :** [Brief from context]
+- **Avantages :** [From Avantages field — bullet list]
+- **Limites :** [From Garde/warnings — bullet list; or "Non précisé dans la fiche"]
+
+#### Option B — **[NOM DU PRODUIT]**
+- **Description :** [Brief from context]
+- **Avantages :** [From Avantages field]
+- **Limites :** [From Garde/warnings]
+
+[Repeat #### Option C only if a third retrieved product is suitable]
+
+### 📄 Documentation Officielle
+- [Option A — Fiche Technique](URL_TDS_FROM_CONTEXT)
+- [Option A — FDS](URL_SDS_FROM_CONTEXT)
+- [Option B — Fiche Technique](URL_TDS_FROM_CONTEXT)
+- [Option B — FDS](URL_SDS_FROM_CONTEXT)
+- Include links per option when URLs exist in context; write "Non précisé dans la fiche" for missing sheets.
+
+[1 sentence: conversational closing — help user choose or offer to narrow down]
 
 ═══ SHARED RULES ═══
 ${GEB_ONLY_BRAND_RULE_PROMPT}

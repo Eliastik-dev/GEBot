@@ -5,6 +5,19 @@ import type { ScrapedProductRow } from "./product-theme.service.js";
 
 export const SCRAPE_LOCALES = ["fr", "nl", "pl"] as const;
 export type ScrapeLocale = (typeof SCRAPE_LOCALES)[number];
+
+/** Curated FAQ / general knowledge row (also loadable from output/faq-knowledge.json). */
+export type ScrapedFaqRow = {
+  id: string;
+  locale: ScrapeLocale;
+  question: string;
+  answer: string;
+  theme?: string | null;
+  audience?: "professional" | "particulier" | "all";
+  source_url?: string | null;
+  tags?: string[];
+};
+
 const LOCALES = SCRAPE_LOCALES;
 const WP_PRODUCT_API_BY_LOCALE: Record<(typeof LOCALES)[number], string> = {
   fr: "https://www.geb.fr/wp-json/wp/v2/product",

@@ -6,7 +6,7 @@ import type { Locale, ProductTheme, Reseller, StoredMessage } from "../types/ind
 import { hasDescalingContext, hasHeatingCircuitContext, hasInaccessibleThreadedJointForResinContext, isJointSealingAssemblyWithoutLeak, isPersonalDrinkwareOutOfCatalog, isPurePipeLeakDamageTurn, isThinRetrievalQuery, userTurnRelevantToLeakRepairThread, hasObviousLeakOrPipeDamageIntent, isThreadedJointOrLiquidSealingTopic } from "../utils/diagnostic-rules.js";
 import { isProfileOnlyMessage, isThemeOnlyMessage } from "../utils/locale.js";
 import { mentionsLikelyProductPhrase } from "../utils/product-mention.js";
-import { normalizeText } from "../utils/text.js";
+import { isInformationalProductQuestion, normalizeText } from "../utils/text.js";
 import { withTimeout } from "../utils/async.js";
 
 const PROBLEM_LEXEME_RE =
@@ -357,6 +357,85 @@ export function isDocumentSheetNode(node: unknown): boolean {
   return isTechnicalSheetNode(node) || isSafetyDataSheetNode(node);
 }
 
+/** FAQ / general knowledge chunks (curated Q&A, not product PDFs). */
+export function isFaqKnowledgeNode(node: unknown): boolean {
+  const metadata = nodeMetadata(node);
+  const docType = String(metadata.document_type ?? "").toLowerCase();
+  const sheetType = String(metadata.sheet_type ?? "").toLowerCase();
+  const type = String(metadata.type ?? "").toLowerCase();
+  const source = String(metadata.source ?? "").toLowerCase();
+  return (
+    docType === "faq" ||
+    sheetType === "faq" ||
+    type === "general_knowledge" ||
+    source === "faq_knowledge_json"
+  );
+}
+
+export type FaqKnowledgeMatch = {
+  matched: boolean;
+  topScore: number;
+  nodes: unknown[];
+};
+
+function retrievalLocale(locale: Locale): "fr" | "nl" | "pl" {
+  if (locale === "nl" || locale === "pl") return locale;
+  return "fr";
+}
+
+/** Lightweight FAQ lookup used before the clarification gate and for context injection. */
+export async function searchFaqKnowledgeMatch(
+  index: VectorStoreIndex,
+  query: string,
+  locale: Locale,
+  options?: { topK?: number; minScore?: number },
+): Promise<FaqKnowledgeMatch> {
+  const topK = options?.topK ?? 4;
+  const minScore = options?.minScore ?? env.FAQ_MATCH_MIN_SCORE;
+  const pkLocale = retrievalLocale(locale);
+
+  const retriever = index.asRetriever({
+    similarityTopK: topK,
+    filters: {
+      filters: [
+        { key: "locale", value: pkLocale, operator: "==" },
+        { key: "document_type", value: "faq", operator: "==" },
+      ],
+      condition: "and",
+    },
+  });
+
+  try {
+    const retrieved = await withTimeout(
+      retriever.retrieve(query),
+      VECTOR_SEARCH_TIMEOUT_MS,
+      "SUPABASE_FAQ_SEARCH",
+    );
+    const nodes = Array.isArray(retrieved) ? retrieved : [];
+    const topScore =
+      nodes.length > 0 && typeof (nodes[0] as { score?: number }).score === "number"
+        ? (nodes[0] as { score: number }).score
+        : 0;
+    return { matched: nodes.length > 0 && topScore >= minScore, topScore, nodes };
+  } catch {
+    return { matched: false, topScore: 0, nodes: [] };
+  }
+}
+
+export async function retrieveFaqKnowledgeChunks(
+  index: VectorStoreIndex,
+  query: string,
+  locale: Locale,
+  options?: { topK?: number },
+): Promise<unknown[]> {
+  const result = await searchFaqKnowledgeMatch(index, query, locale, {
+    topK: options?.topK ?? 6,
+    minScore: 0,
+  });
+  return result.nodes;
+}
+
+
 
 export function isPdfNode(node: unknown): boolean {
   const metadata = (node as { node?: { metadata?: Record<string, unknown> } }).node?.metadata ?? {};
@@ -405,12 +484,16 @@ function isProductKnowledgeNode(node: unknown): boolean {
 
 export function prioritizeTechnicalSheets<T>(nodes: T[]): T[] {
   const catalogNodes = nodes.filter((node) => isProductKnowledgeNode(node));
-  const nonCatalogNodes = nodes.filter((node) => !isProductKnowledgeNode(node));
+  const faqNodes = nodes.filter((node) => isFaqKnowledgeNode(node));
+  const nonCatalogNodes = nodes.filter(
+    (node) => !isProductKnowledgeNode(node) && !isFaqKnowledgeNode(node),
+  );
 
   const sheetNodes = nonCatalogNodes.filter((node) => isDocumentSheetNode(node));
-  if (sheetNodes.length > 0) return [...catalogNodes, ...sheetNodes];
+  if (sheetNodes.length > 0) return [...catalogNodes, ...faqNodes, ...sheetNodes];
   const pdfNonCatalogNodes = nonCatalogNodes.filter((node) => isPdfNode(node) && !isCatalogNode(node));
-  if (pdfNonCatalogNodes.length > 0) return [...catalogNodes, ...pdfNonCatalogNodes];
+  if (pdfNonCatalogNodes.length > 0) return [...catalogNodes, ...faqNodes, ...pdfNonCatalogNodes];
+  if (faqNodes.length > 0) return [...catalogNodes, ...faqNodes];
   if (catalogNodes.length > 0) return catalogNodes;
   return [];
 }

@@ -249,6 +249,18 @@ export function mentionsLikelyProductPhrase(text: string): boolean {
   return collectCatalogSearchTerms(text).length >= 2;
 }
 
+/** True when retrieval should treat session theme as a soft boost, not a hard SQL/vector filter. */
+export function isExplicitProductTargeted(texts: string[]): boolean {
+  for (const raw of texts) {
+    const text = raw?.trim();
+    if (!text) continue;
+    if (mentionsLikelyProductPhrase(text)) return true;
+    if (extractCatalogProductCodes(text).length > 0) return true;
+    if (isExplicitProductLookupQuery(text)) return true;
+  }
+  return false;
+}
+
 function productText(product: ProductKnowledgeRow): { title: string; slug: string; slugSpaced: string } {
   const title = normalizeProductMentionText(decodeHtmlEntities(product.canonical_name));
   const slug = normalizeProductMentionText(product.slug);

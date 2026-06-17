@@ -1,9 +1,13 @@
 # GEBot Output Contract
 - **MODE 1 (conversational):** Natural prose for greetings, clarifications, and non-product answers — no rigid section template.
-- **MODE 2 (product recommendation):** Conversational opening/closing + strict block:
+- **MODE 2 (single product recommendation):** Conversational opening/closing + strict block:
   1) ### 📦 Produit Recommandé : **<NOM PRODUIT>** (Description + Utilisation)
   2) ### 🛒 Disponibilité (Amazon + revendeur — injected by backend when applicable)
   3) ### 📄 Documentation Officielle (Fiche Technique + FDS)
+- **MODE 3 (comparison):** When 2–3 suitable products are retrieved for an open recommendation, conversational opening/closing + strict block:
+  1) ### 🔍 Options Comparées with #### Option A/B(/C) — each with Description, Avantages (from catalogue), Limites (from Garde/warnings)
+  2) ### 🛒 Disponibilité (Amazon for Option A — injected by backend)
+  3) ### 📄 Documentation Officielle (FT/FDS links per option)
 - If a field is missing from context, write `Non précisé dans la fiche`.
 - Cite at least one official source URL when available.
 - Tone: Expert, pedagogical, and concise.

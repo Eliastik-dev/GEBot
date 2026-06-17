@@ -24,6 +24,8 @@ import {
   mergeRetrievalNodes,
   prioritizeTechnicalSheets,
   retrievePdfChunksForSlugs,
+  retrieveFaqKnowledgeChunks,
+  searchFaqKnowledgeMatch,
   summarizeNodeForDebug,
   AUTOMOTIVE_EXHAUST_SUPPLEMENT_QUERY,
 } from "../services/rag.service.js";
@@ -62,6 +64,7 @@ import {
   formatNamedProductCitationPrompt,
   hasNamedProductCitation,
   isExplicitProductLookupQuery,
+  isExplicitProductTargeted,
   isFactualProductQuestion,
   resolveDirectCitedProduct,
   resolveDirectTechnicalSheetProduct,
@@ -532,6 +535,9 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
             }).catch(() => ({ products: [], best: null, bestScore: 0 }))
           : { products: [], best: null, bestScore: 0 };
       const hasCatalogCitation = catalogCitation.products.length > 0;
+      const explicitProductTargeted =
+        hasCatalogCitation ||
+        isExplicitProductTargeted([citationScanText, effectiveQuery, message, queryForRetrieval]);
       const citeNorm = citationScanText
         .toLowerCase()
         .normalize("NFD")
@@ -587,6 +593,43 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         diagnosticResult.clarification_message &&
         !hasCatalogCitation
       ) {
+        const informationalQuestion =
+          isInformationalProductQuestion(queryForRetrieval) ||
+          isInformationalProductQuestion(message) ||
+          isInformationalProductQuestion(effectiveQuery);
+        let faqPreMatch: Awaited<ReturnType<typeof searchFaqKnowledgeMatch>> | null = null;
+
+        if (informationalQuestion) {
+          extractedMeta.needs_clarification = false;
+          extractedMeta.missing_params = extractedMeta.missing_params.filter(
+            (p) => !["fluid", "diameter", "pressure", "joint_service_fluid"].includes(p),
+          );
+          if (extractedMeta.missing_params.length === 0) {
+            extractedMeta.needs_clarification = false;
+          }
+          if (["leak_repair", "pipe_repair", "inaccessible_leak", "sealing_assembly"].includes(extractedMeta.intent)) {
+            extractedMeta.intent = "general_technical";
+          }
+          console.log("[/api/chat] informational_clarification_bypass", {
+            sessionId,
+            intent: extractedMeta.intent,
+            missing_params: extractedMeta.missing_params,
+          });
+        } else {
+          faqPreMatch = await searchFaqKnowledgeMatch(deps.index, queryForRetrieval, locale).catch(() => null);
+          if (faqPreMatch?.matched) {
+            extractedMeta.needs_clarification = false;
+            extractedMeta.missing_params = [];
+            if (extractedMeta.intent === "unknown") extractedMeta.intent = "general_technical";
+            console.log("[/api/chat] faq_clarification_bypass", {
+              sessionId,
+              topScore: faqPreMatch.topScore,
+              chunks: faqPreMatch.nodes.length,
+            });
+          }
+        }
+
+        if (extractedMeta.needs_clarification) {
         const response = diagnosticResult.clarification_message;
         startSse(res);
         sseWrite(res, { delta: response, sessionId, audience }, "chunk");
@@ -613,7 +656,14 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         );
         res.end();
         return;
+        }
       }
+
+      const informationalRetrievalQuestion =
+        isInformationalProductQuestion(queryForRetrieval) ||
+        isInformationalProductQuestion(message) ||
+        isInformationalProductQuestion(effectiveQuery);
+      let faqContextNodes: unknown[] = [];
 
       const ongoingConversationEarly = hasOngoingConversation(historyMessages);
       const feedbackCorrection = resolveFeedbackProductCorrectionContext(historyMessages, message);
@@ -816,13 +866,15 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         }
       }
       const baseFilters = [{ key: "locale", value: locale, operator: "==" as const }];
-      const themeFilters = effectiveTheme
-        ? [{ key: "theme", value: effectiveTheme, operator: "==" as const }]
-        : [];
+      const applyThemeHardFilter = Boolean(effectiveTheme) && !explicitProductTargeted;
+      const themeFilters =
+        applyThemeHardFilter && effectiveTheme
+          ? [{ key: "theme", value: effectiveTheme, operator: "==" as const }]
+          : [];
       const policyFilters = allowFrenchStandards
         ? []
         : [{ key: "regulatory_scope", value: "GLOBAL", operator: "==" as const }];
-      const preFilters = effectiveTheme
+      const preFilters = applyThemeHardFilter
         ? {
             filters: [...baseFilters, ...themeFilters, ...policyFilters],
             condition: "and" as const,
@@ -836,6 +888,13 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
               filters: [...baseFilters, ...policyFilters],
               condition: "and" as const,
             };
+      if (explicitProductTargeted && effectiveTheme) {
+        console.log("[/api/chat] soft_theme_filter", {
+          sessionId,
+          theme: effectiveTheme,
+          catalogCitationSlugs: catalogCitation.products.map((p) => p.slug),
+        });
+      }
 
       const pkLocale = pkLocaleEarly;
       const catalogSize = catalogSizeEarly;
@@ -968,7 +1027,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         resolvedNodes = Array.isArray(retrievedNodes) ? retrievedNodes : [];
         retrievalCount = resolvedNodes.length;
 
-        if (retrievalCount < 3 && effectiveTheme && !explicitTheme) {
+        if ((retrievalCount < 3 || retrievalCount === 0) && effectiveTheme && applyThemeHardFilter) {
           console.log("[/api/chat] theme filter yielded few results, retrying without theme filter", { sessionId, theme: effectiveTheme, retrievalCount });
           const noThemeFilters = {
             filters: [...baseFilters, ...policyFilters],
@@ -1043,7 +1102,16 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           searchQuery,
           extractedMeta,
           effectiveTheme,
-          { lite: vectorRagLite },
+          {
+            lite: vectorRagLite,
+            softThemeFilter: explicitProductTargeted,
+            explicitProductSlugs: [
+              ...new Set([
+                ...catalogCitation.products.map((p) => p.slug),
+                ...pkResolvedProducts.map((p) => p.slug),
+              ]),
+            ],
+          },
         );
         resolvedNodes = filterRetrievalNodesByFeedbackPenalties(resolvedNodes, allPenalizedSlugs);
         preTechnicalFilterCount = retrievalCount;
@@ -1119,6 +1187,18 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         }
       }
 
+      if (informationalRetrievalQuestion || extractedMeta.intent === "general_technical") {
+        faqContextNodes = await retrieveFaqKnowledgeChunks(deps.index, queryForRetrieval, locale, {
+          topK: 6,
+        }).catch(() => []);
+        if (faqContextNodes.length > 0) {
+          console.log("[/api/chat] faq_context_prefetch", {
+            sessionId,
+            chunks: faqContextNodes.length,
+          });
+        }
+      }
+
       if (
         env.PRODUCT_KNOWLEDGE_ENABLED &&
         catalogSize > 0 &&
@@ -1141,6 +1221,15 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
             message: message.slice(0, 80),
           });
         }
+      }
+
+      if (faqContextNodes.length > 0) {
+        resolvedNodes = mergeRetrievalNodes(faqContextNodes, resolvedNodes);
+        console.log("[/api/chat] faq_context_injected", {
+          sessionId,
+          chunks: faqContextNodes.length,
+          totalNodes: resolvedNodes.length,
+        });
       }
 
       resolvedNodes = prioritizeTechnicalSheets(resolvedNodes);
@@ -1229,6 +1318,12 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         retrievalPath === "product_knowledge"
           ? "\nSTRUCTURED_CATALOG_PRIORITY: Le catalogue structuré guide le CHOIX du produit. Les extraits FT/FDS PDF sont la source pour compatibilité matériaux/fluides/pressions — en cas d'écart, suivre le PDF.\n"
           : "";
+      const comparisonEligible =
+        pkResolvedProducts.length >= 2 &&
+        retrievalPath === "product_knowledge" &&
+        !productFollowUp &&
+        !hasCatalogCitation &&
+        !isFactualProductQuestion(citationScanText);
       const fullQuery = `${buildSystemPrompt(
         locale,
         audience,
@@ -1241,6 +1336,9 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         negativeExamples,
         ongoingConversation,
         productFollowUp && priorRecommendedProduct ? { priorProduct: priorRecommendedProduct } : null,
+        comparisonEligible
+          ? { eligible: true, productCount: pkResolvedProducts.length }
+          : null,
       )}${catalogAnchorReminder}
 
 METADATA_PROFIL: ${toAudienceLabel(audience)}
@@ -1256,6 +1354,7 @@ ${productFollowUp && priorRecommendedProduct ? `\nTYPE_QUESTION: product_follow_
 ${isFactualProductQuestion(citationScanText) && hasCatalogCitation ? "\nTYPE_QUESTION: factual_product — MODE 1: répondez factuellement (oui/non, limites) depuis FT/FDS du produit identifié. Ne pivotez pas vers un autre SKU." : ""}
 ${!productFollowUp && !isFactualProductQuestion(citationScanText) && !hasCatalogCitation && isInformationalProductQuestion(queryForRetrieval) ? "\nTYPE_QUESTION: informational_faq — MODE 1: réponds DIRECTEMENT à la question en prose naturelle avec les faits de la fiche." : ""}
 ${hasCatalogCitation && !isFactualProductQuestion(citationScanText) ? "\nTYPE_QUESTION: cited_product — MODE 2 sur le produit catalogue identifié (profil/domaine ignorés si la fiche correspond)." : ""}
+${comparisonEligible ? `\nTYPE_QUESTION: open_recommendation_comparison — MODE 3 OBLIGATOIRE. ${pkResolvedProducts.length} produits catalogue récupérés : comparez-les (Option A/B${pkResolvedProducts.length >= 3 ? "/C" : ""}) avec Avantages et Limites issus des champs catalogue ; ne recommandez pas un seul SKU.` : ""}
 ${formatNamedProductCitationPrompt(citationScanText, catalogCitation.best?.canonical_name)}
 
 RAPPEL_DIAGNOSTIC: Les extraits peuvent melanger fiches techniques (TDS / limites d'application: pression, fluides, temperatures) et fiches de securite (SDS ou FDS / compatibilite chimique, dangers). Croiser les deux familles de documents uniquement lorsque leurs contenus sont presents dans les extraits ci-dessous.

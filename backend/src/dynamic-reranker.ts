@@ -223,7 +223,11 @@ function computeIntentBoost(text: string, metadata: ExtractedMetadata, userQuery
 
 function computeSheetTypeBoost(sheetType: string, metadata: ExtractedMetadata): number {
   const isLeakLike = ["leak_repair", "pipe_repair", "inaccessible_leak"].includes(metadata.intent);
+  const isFaqLike = metadata.intent === "general_technical" || metadata.intent === "product_info";
 
+  if (sheetType === "faq") {
+    return isFaqLike ? 0.22 : 0.1;
+  }
   if (sheetType === "ft" || sheetType === "tds") {
     return isLeakLike ? 0.08 : 0.04;
   }
@@ -256,15 +260,27 @@ function computeThemeBoost(
   theme: ProductTheme | null | undefined,
   userQuery: string,
   searchQuery: string,
+  softThemeFilter = false,
+  explicitProductSlugs: string[] = [],
 ): number {
   let boost = 0;
   const exhaustContext = isAutomotiveExhaustContext(userQuery, searchQuery);
   const automotiveContext = theme === "automobile" || AUTOMOTIVE_QUERY_PATTERN.test(normalizeText(`${userQuery} ${searchQuery}`));
 
+  if (
+    explicitProductSlugs.length > 0 &&
+    explicitProductSlugs.some((slug) => {
+      const normSlug = normalizeText(slug.replace(/-/g, " "));
+      return text.includes(normSlug) || titleSlug.includes(normSlug);
+    })
+  ) {
+    boost += 0.28;
+  }
+
   if (theme && nodeTheme === theme) {
     boost += 0.12;
   } else if (theme && nodeTheme && nodeTheme !== theme) {
-    boost -= 0.18;
+    boost -= softThemeFilter ? 0.03 : 0.18;
   }
 
   if (exhaustContext) {
@@ -358,10 +374,14 @@ function computeDemotionPenalty(
   return penalty;
 }
 
-function computeLiteThemeBoost(nodeTheme: string, theme: ProductTheme | null | undefined): number {
+function computeLiteThemeBoost(
+  nodeTheme: string,
+  theme: ProductTheme | null | undefined,
+  softThemeFilter = false,
+): number {
   if (!theme) return 0;
   if (nodeTheme === theme) return 0.1;
-  if (nodeTheme && nodeTheme !== theme) return -0.12;
+  if (nodeTheme && nodeTheme !== theme) return softThemeFilter ? -0.02 : -0.12;
   return 0;
 }
 
@@ -394,6 +414,10 @@ function computeLiteDemotionPenalty(text: string, metadata: ExtractedMetadata, u
 export type DynamicRerankOptions = {
   /** Phase 4: intent + sheet-type scoring only; no automotive/exhaust scenario patches. */
   lite?: boolean;
+  /** Session theme is a soft boost (explicit product targeted) — reduce cross-theme demotion. */
+  softThemeFilter?: boolean;
+  /** Slugs from explicit catalogue citation — boost matching nodes regardless of theme. */
+  explicitProductSlugs?: string[];
 };
 
 /**
@@ -411,6 +435,8 @@ export function dynamicRerank<T>(
   if (nodes.length <= 1) return [...nodes];
 
   const lite = options?.lite ?? false;
+  const softThemeFilter = options?.softThemeFilter ?? false;
+  const explicitProductSlugs = options?.explicitProductSlugs ?? [];
 
   const scored: ScoredNode<T>[] = nodes.map((node, idx) => {
     const vectorScore = typeof (node as { score?: number }).score === "number"
@@ -423,8 +449,17 @@ export function dynamicRerank<T>(
 
     const intentBoost = computeIntentBoost(text, metadata, userQuery);
     const themeBoost = lite
-      ? computeLiteThemeBoost(nodeTheme, theme)
-      : computeThemeBoost(titleSlug, text, nodeTheme, theme, userQuery, searchQuery);
+      ? computeLiteThemeBoost(nodeTheme, theme, softThemeFilter)
+      : computeThemeBoost(
+          titleSlug,
+          text,
+          nodeTheme,
+          theme,
+          userQuery,
+          searchQuery,
+          softThemeFilter,
+          explicitProductSlugs,
+        );
     const sheetBoost = computeSheetTypeBoost(sheetType, metadata);
     const penalty = lite
       ? computeLiteDemotionPenalty(text, metadata, userQuery)

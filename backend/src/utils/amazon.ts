@@ -233,7 +233,30 @@ export function extractRecommendedRef(answer: string): string | null {
 }
 
 
+export function isComparisonModeAnswer(answer: string): boolean {
+  return (
+    /###\s*🔍?\s*Options Comparées/i.test(answer) ||
+    /###\s*Compared Options/i.test(answer) ||
+    /###\s*Porównywane opcje/i.test(answer) ||
+    /###\s*Vergelijkte opties/i.test(answer)
+  );
+}
+
+function extractComparisonOptionProducts(answer: string): string[] {
+  const products: string[] = [];
+  const optionPattern = /####\s*Option\s+[A-C]\s*[—–-]\s*\*\*([^*]+)\*\*/gi;
+  for (const match of answer.matchAll(optionPattern)) {
+    const label = cleanRecommendedProductLabel(match[1]?.trim() ?? "");
+    if (label) products.push(label);
+  }
+  return products;
+}
+
 export function extractRecommendedProduct(answer: string): string | null {
+  if (isComparisonModeAnswer(answer)) {
+    const comparisonProducts = extractComparisonOptionProducts(answer);
+    if (comparisonProducts.length > 0) return comparisonProducts[0]!;
+  }
   const headingMatch = answer.match(/Produit Recommandé\s*:\s*\*\*([^*]+)\*\*/i);
   if (headingMatch?.[1]) return decodeHtmlEntities(headingMatch[1].trim());
   const plainHeadingMatch = answer.match(/Produit Recommandé\s*:\s*([^\n\r*][^\n\r]+)/i);
@@ -275,6 +298,9 @@ export function isNonProductLabel(value: string | null): boolean {
 
 /** True when the assistant named a real catalogue product (not a placeholder). */
 export function hasValidRecommendedProduct(answer: string): boolean {
+  if (isComparisonModeAnswer(answer)) {
+    return extractComparisonOptionProducts(answer).length > 0;
+  }
   return cleanRecommendedProductLabel(extractRecommendedProduct(answer)) !== null;
 }
 
