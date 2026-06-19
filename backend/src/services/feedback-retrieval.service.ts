@@ -36,7 +36,7 @@ type FeedbackRow = {
 };
 
 const POSITIVE_SIMILARITY_MIN = 0.26;
-const NEGATIVE_SIMILARITY_MIN = 0.32;
+const NEGATIVE_SIMILARITY_MIN = 0.24;
 const FEEDBACK_POOL_LIMIT = 120;
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -320,7 +320,7 @@ export function feedbackSlugScoreDelta(
     if (slugMatches(slug, target)) delta -= 48;
   }
   for (const target of adjustments.sessionPenalizeSlugs) {
-    if (slugMatches(slug, target)) delta -= 72;
+    if (slugMatches(slug, target)) delta -= 120;
   }
 
   return delta;

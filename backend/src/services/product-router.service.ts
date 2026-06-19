@@ -8,7 +8,9 @@ import {
 import {
   isPersonalDrinkwareOutOfCatalog,
   isPiscineInaccessiblePipeLeak,
+  isPiscineLeakContext,
   isBuildingSurfaceSealingContext,
+  isSanitaryFixtureSealingContext,
   isWoodStoveCosmeticCareContext,
 } from "../utils/diagnostic-rules.js";
 import type { ExtractedMetadata } from "../intent-extractor.js";
@@ -68,6 +70,27 @@ export function resolveUseCaseTags(input: ProductRouterInput): string[] {
   ) {
     tags.add("piscine");
     tags.add("reparation_fuite");
+    return [...tags];
+  }
+
+  if (isPiscineLeakContext(combinedText, theme)) {
+    tags.add("piscine");
+    tags.add("reparation_fuite");
+    if (/\b(colmateur|colmat|boucher|fuites?|fuit|perd|niveau|baisse)\b/.test(q)) {
+      tags.add("colmateur");
+    }
+    if (isPiscineInaccessiblePipeLeak(combinedText) || /\bcolmateur\b/.test(q)) {
+      return [...tags];
+    }
+  }
+
+  if (theme === "piscine" && /\b(fuite|fuit|fuites|perd|colmat|boucher|niveau|baisse)\b/.test(q)) {
+    tags.add("piscine");
+    tags.add("reparation_fuite");
+  }
+
+  if (isSanitaryFixtureSealingContext(combinedText)) {
+    tags.add("silicone_sanitaire");
     return [...tags];
   }
 
@@ -165,7 +188,13 @@ export function resolveUseCaseTags(input: ProductRouterInput): string[] {
   if (metadata.intent === "silicone_application") {
     tags.add("silicone_sanitaire");
   }
+  if (isSanitaryFixtureSealingContext(combinedText)) {
+    tags.add("silicone_sanitaire");
+  }
   if (/silicone|mastic\s+sanitaire|\bchrono\b|sechage|seche|secher/.test(q)) {
+    tags.add("silicone_sanitaire");
+  }
+  if (/\b(mastic|joint)\b/.test(q) && /\b(baignoire|douche|receveur|lavabo|evier|email|sanitaire)\b/.test(q)) {
     tags.add("silicone_sanitaire");
   }
   if (metadata.intent === "installation_lubrication") {

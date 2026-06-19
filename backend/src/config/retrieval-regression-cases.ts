@@ -279,6 +279,32 @@ export const RETRIEVAL_REGRESSION_CASES: RetrievalRegressionCase[] = [
     intent: "inaccessible_leak",
   },
   {
+    id: "piscine-fuite-niveau-eau-baisse-colmateur",
+    locale: "fr",
+    theme: "piscine",
+    audience: "professional",
+    query:
+      "J'ai mon niveau d'eau qui baisse régulièrement, as tu un produit pour boucher la fuite qu'il doit y avoir ?",
+    expectedSlugs: ["pool-colmateur-de-fuites", "pool-lekdichter", "g41-colmateur-universel-des-micro-fuites"],
+    forbiddenSlugs: [
+      "pate-de-montage-echappement-collex",
+      "mastic-de-reparation-echappement-collex",
+      "gebatout",
+      "pate-a-joint-eau-potable",
+    ],
+    intent: "leak_repair",
+  },
+  {
+    id: "sanitaire-joint-baignoire-mastic-eau",
+    locale: "fr",
+    theme: "plomberie",
+    audience: "particulier",
+    query: "Je recherche un mastic à l'eau pour faire le joint autour de ma baignoire en émail",
+    expectedSlugs: ["silicone-bain-cuisine", "geborizon-silicone-sanitaire"],
+    forbiddenSlugs: ["gebatout", "pate-a-joint-eau-potable", "pate-de-montage-echappement-collex"],
+    intent: "silicone_application",
+  },
+  {
     id: "pate-joint-eau-potable-nom-produit",
     locale: "fr",
     theme: "maintenance",

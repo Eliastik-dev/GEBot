@@ -7,6 +7,7 @@ import {
   hasInaccessibleThreadedJointForResinContext,
   isBuildingSurfaceSealingContext,
   isPiscineInaccessiblePipeLeak,
+  isSanitaryFixtureSealingContext,
 } from "./diagnostic-rules.js";
 
 export type JointServiceFluidCategory =
@@ -33,7 +34,7 @@ function normalizeText(value: string): string {
 }
 
 export function asksMetalThreadPasteJoint(text: string): boolean {
-  if (isBuildingSurfaceSealingContext(text)) return false;
+  if (isBuildingSurfaceSealingContext(text) || isSanitaryFixtureSealingContext(text)) return false;
   const q = normalizeText(text);
   return (
     /\b(pate|pâte)\s+[aà]\s+joint\b/.test(q) ||

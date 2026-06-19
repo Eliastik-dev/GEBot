@@ -2,7 +2,7 @@ import { COMPLEMENTARY_HINTS } from "../config/constants.js";
 import type { Audience, HandoffPayload, Locale, ProductTheme, Reseller } from "../types/index.js";
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { formatUserFacingMismatchNote, normalizeStoredProductTheme } from "../services/product-theme.service.js";
-import { removeAmazonSections } from "./amazon.js";
+import { removeAmazonSections, hasValidRecommendedProduct } from "./amazon.js";
 import { detectTheme } from "./locale.js";
 import { isBuildingSurfaceSealingContext } from "./diagnostic-rules.js";
 import { asksMetalThreadPasteJoint } from "./joint-paste.js";
@@ -580,6 +580,67 @@ export function answerProvidesProductGuidance(answer: string): boolean {
   if (/contactez\s+(le\s+)?service\s+consommateurs/i.test(answer)) return true;
   if (/aucun\s+(des\s+)?produits?\s+geb/i.test(answer) && /\bgeb[\wéèêë\-+]+\b/i.test(answer)) return true;
   return false;
+}
+
+const INCOMPATIBILITY_OPENING_RE =
+  /\b(n['']?est\s+pas\s+adapt[eé]|pas\s+adapt[eé]|n['']?est\s+pas\s+le\s+bon|ne\s+convient\s+pas|inadapt[eé]|pas\s+un\s+mastic\s+de\s+surface|pas\s+pour\s+(l['']?eau\s+de\s+)?piscine|con[cç]u\s+pour\s+l['']?echappement|pas\s+pour\s+les?\s+joints?\s+visibles?)\b/i;
+
+/** LLM wrote that the recommended product is unsuitable while still outputting MODE 2. */
+export function answerContradictsRecommendation(answer: string): boolean {
+  if (!hasValidRecommendedProduct(answer)) return false;
+  const productIdx = answer.search(/###\s*📦\s*Produit Recommand/i);
+  if (productIdx < 0) return false;
+  const opening = answer.slice(0, productIdx);
+  return INCOMPATIBILITY_OPENING_RE.test(openizeText(opening));
+}
+
+function openizeText(text: string): string {
+  return normalizeText(text);
+}
+
+/** Strip MODE 2 block when the opening contradicts the recommendation. */
+export function stripContradictoryProductRecommendation(answer: string): string {
+  if (!answerContradictsRecommendation(answer)) return answer;
+  const stripped = stripAnswerWithoutProductRecommendation(removeAmazonSections(answer));
+  const opening = stripped.trim();
+  if (opening.length >= 40) return opening;
+  return (
+    opening +
+    "\n\nPour vous orienter vers le bon produit GEB, pouvez-vous préciser le support (émail, carrelage, PVC…) et si le joint est visible ou s'il s'agit d'un raccord fileté ?"
+  ).trim();
+}
+
+/** Short closing messages — no new retrieval. */
+export function isGratitudeOrClosingMessage(message: string): boolean {
+  const n = normalizeText(message).replace(/[!?.…]+/g, "").trim();
+  if (n.length > 80) return false;
+  return (
+    /^(merci|merci beaucoup|ok merci|parfait merci|super merci|tres bien merci|bien merci|c est bon|cest bon|parfait|super|tres bien|bien recu|a plus|au revoir|bonne journee|bonne soiree|thanks|thank you|dank je|dank u|dziekuje|dzieki)$/.test(
+      n,
+    ) ||
+    (/^(merci|thanks|dziekuje)\b/.test(n) && n.split(/\s+/).length <= 6)
+  );
+}
+
+export function buildGratitudeReply(locale: Locale, audience: Audience | null): string {
+  if (locale === "en") {
+    return audience === "professional"
+      ? "You're welcome. Feel free to reach out if you need anything else — our Lab is here for technical follow-up."
+      : "You're welcome. Don't hesitate if you have another question.";
+  }
+  if (locale === "nl") {
+    return audience === "professional"
+      ? "Graag gedaan. Aarzel niet om opnieuw contact op te nemen — ons Lab staat klaar voor technische opvolging."
+      : "Graag gedaan. Aarzel niet als u nog een vraag heeft.";
+  }
+  if (locale === "pl") {
+    return audience === "professional"
+      ? "Proszę bardzo. W razie kolejnych pytań — nasze Laboratorium pomoże w kwestiach technicznych."
+      : "Proszę bardzo. Zapraszam, jeśli będzie Pan/Pani miał/a kolejne pytania.";
+  }
+  return audience === "professional"
+    ? "Avec plaisir. N'hésitez pas si vous avez d'autres questions — notre Laboratoire reste disponible pour le suivi technique."
+    : "Avec plaisir. N'hésitez pas si vous avez d'autres questions sur votre installation.";
 }
 
 export function buildMoreDetailsForProductRequest(

@@ -185,6 +185,7 @@ export function Widget({ apiBaseUrl }: Props) {
   const [backendStatus, setBackendStatus] = useState<"searching" | "generating" | null>(null);
   const [footerEditMode, setFooterEditMode] = useState<FooterEditMode>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const latestUserRef = useRef<HTMLDivElement | null>(null);
   const latestAssistantRef = useRef<HTMLDivElement | null>(null);
   const hasScrolledToNewMsg = useRef(false);
 
@@ -212,15 +213,25 @@ export function Widget({ apiBaseUrl }: Props) {
     setFooterEditMode((current) => (current === mode ? null : mode));
   }, [busy]);
 
+  const scrollToLatestTurn = useCallback(() => {
+    const container = listRef.current;
+    if (!container) return;
+    const userEl = latestUserRef.current;
+    const assistantEl = latestAssistantRef.current;
+    const target = userEl ?? assistantEl;
+    if (!target) return;
+    const targetTop = target.offsetTop - container.offsetTop;
+    container.scrollTo({ top: Math.max(0, targetTop - 8), behavior: "smooth" });
+  }, []);
+
   const scrollToNewMessage = useCallback(() => {
     if (hasScrolledToNewMsg.current) return;
     const container = listRef.current;
     const msgEl = latestAssistantRef.current;
     if (!container || !msgEl) return;
     hasScrolledToNewMsg.current = true;
-    const msgTop = msgEl.offsetTop - container.offsetTop;
-    container.scrollTo({ top: msgTop - 8, behavior: "smooth" });
-  }, []);
+    scrollToLatestTurn();
+  }, [scrollToLatestTurn]);
 
   useEffect(() => {
     void i18n.changeLanguage(locale);
@@ -295,6 +306,7 @@ export function Widget({ apiBaseUrl }: Props) {
     }
     hasScrolledToNewMsg.current = false;
     setMsgs((m) => [...m, { role: "user", content: q }, { role: "assistant", content: "" }]);
+    queueMicrotask(scrollToLatestTurn);
 
     let acc = "";
     try {
@@ -549,10 +561,15 @@ export function Widget({ apiBaseUrl }: Props) {
             {!isChatLocked &&
               msgs.map((m, idx) => {
               const isUser = m.role === "user";
+              const isLastUser = isUser && idx === msgs.length - 2;
               const isLastAssistant = !isUser && idx === msgs.length - 1;
               const showFeedback = !isUser && m.content && m.messageId && !busy;
               return (
-                <div key={idx} ref={isLastAssistant ? latestAssistantRef : undefined} className={cn("flex flex-col", isUser ? "items-end" : "items-start")}>
+                <div
+                  key={idx}
+                  ref={isLastUser ? latestUserRef : isLastAssistant ? latestAssistantRef : undefined}
+                  className={cn("flex flex-col", isUser ? "items-end" : "items-start")}
+                >
                   <div
                     className={cn(
                       "max-w-[92%] rounded-xl px-2.5 py-1.5 text-xs leading-relaxed sm:max-w-[88%] sm:rounded-2xl sm:px-3 sm:py-2 sm:text-sm",

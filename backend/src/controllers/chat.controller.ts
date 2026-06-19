@@ -33,6 +33,8 @@ import { hasDescalingContext, hasHeatingCircuitContext, isBuildingEnvelopeLeakCo
 import {
   countProductKnowledge,
   detectCatalogProductCitations,
+  filterProductKnowledgeByPenalties,
+  filterProductKnowledgeByQueryContext,
   getProductKnowledgeBySlug,
   lookupCatalogProductsByCitation,
   lookupCitedCatalogProductForRecommendation,
@@ -50,9 +52,9 @@ import type { Audience, ChatRequestBody, Locale, ProductTheme, Reseller } from "
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import { fireAndForget, withTimeout } from "../utils/async.js";
 import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection } from "../utils/amazon.js";
-import { resolveFeedbackProductCorrectionContext, resolveProductCitationQuery, buildUserCitationScanText } from "../utils/feedback-correction.js";
+import { resolveAnyProductCorrectionContext, resolveProductCitationQuery, buildUserCitationScanText } from "../utils/feedback-correction.js";
 import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, isThemeUncertaintyMessage, buildThemeUncertaintyReply, normalizeAudience, normalizeLocale } from "../utils/locale.js";
-import { answerProvidesProductGuidance, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectCitedProductReply, buildDirectTechnicalSheetReply, buildEscalationSection, buildHandoff, buildPurchaseAvailabilityIntro, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
+import { answerProvidesProductGuidance, answerContradictsRecommendation, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectCitedProductReply, buildDirectTechnicalSheetReply, buildEscalationSection, buildGratitudeReply, buildHandoff, buildPurchaseAvailabilityIntro, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isGratitudeOrClosingMessage, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripContradictoryProductRecommendation, stripLeadingConversationGreeting } from "../utils/response.js";
 import {
   getLastDiscussedProductFromHistory,
   getLastDiscussedProductSlugFromHistory,
@@ -100,14 +102,41 @@ function nodeSlugFromRetrievalItem(item: unknown): string {
   return String(metadata.slug ?? "");
 }
 
-function filterRetrievalNodesByFeedbackPenalties(nodes: unknown[], penalizeSlugs: string[]): unknown[] {
-  if (penalizeSlugs.length === 0 || nodes.length === 0) return nodes;
+function filterRetrievalNodesByFeedbackPenalties(
+  nodes: unknown[],
+  penalizeSlugs: string[],
+  sessionPenalizeSlugs: string[] = [],
+): unknown[] {
+  if (nodes.length === 0) return nodes;
+
+  if (sessionPenalizeSlugs.length > 0) {
+    const withoutSession = nodes.filter((item) => {
+      const slug = nodeSlugFromRetrievalItem(item);
+      if (!slug) return true;
+      return !sessionPenalizeSlugs.some((target) => slug.includes(target) || target.includes(slug));
+    });
+    if (withoutSession.length > 0) return withoutSession;
+  }
+
+  if (penalizeSlugs.length === 0) return nodes;
   const filtered = nodes.filter((item) => {
     const slug = nodeSlugFromRetrievalItem(item);
     if (!slug) return true;
     return !penalizeSlugs.some((target) => slug.includes(target) || target.includes(slug));
   });
   return filtered.length > 0 ? filtered : nodes;
+}
+
+function buildAnswerCacheKey(
+  locale: string,
+  audience: Audience | null,
+  theme: ProductTheme | null | undefined,
+  queryForRetrieval: string,
+  penaltySlugs: string[] = [],
+): string {
+  const penaltyKey =
+    penaltySlugs.length > 0 ? penaltySlugs.slice().sort().join("|") : "none";
+  return `${ANSWER_CACHE_VERSION}|${locale}|${audience}|${theme ?? "none"}|${queryForRetrieval.toLowerCase()}|pen:${penaltyKey}`;
 }
 
 export async function postChat(req: Request, res: Response, deps: ChatDeps) {
@@ -179,6 +208,28 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           "logQuery.awaiting_profile",
         );
         sseWrite(res, { done: true, sessionId, geoCountry: effectiveGeoCountry }, "done");
+        res.end();
+        return;
+      }
+
+      if (hasOngoingConversation(historyMessages) && isGratitudeOrClosingMessage(message)) {
+        const response = buildGratitudeReply(locale, audience);
+        startSse(res);
+        sseWrite(res, { delta: response, sessionId, audience }, "chunk");
+        await saveMessage(sessionId, "assistant", response);
+        fireAndForget(
+          logQuery({
+            sessionId,
+            locale,
+            audience,
+            fluidType: fluidHint,
+            query: message,
+            responseMs: Date.now() - startedAt,
+            status: "gratitude_closing",
+          }),
+          "logQuery.gratitude_closing",
+        );
+        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -691,7 +742,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       let faqContextNodes: unknown[] = [];
 
       const ongoingConversationEarly = hasOngoingConversation(historyMessages);
-      const feedbackCorrection = resolveFeedbackProductCorrectionContext(historyMessages, message);
+      const feedbackCorrection = resolveAnyProductCorrectionContext(historyMessages, message);
 
       if (
         feedbackCorrection &&
@@ -841,45 +892,6 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       }
 
       const resellerPromise = locale === "pl" ? Promise.resolve<Reseller[]>([]) : getCachedResellers().catch(() => []);
-      const cacheKey = `${ANSWER_CACHE_VERSION}|${locale}|${audience}|${effectiveTheme ?? "none"}|${queryForRetrieval.toLowerCase()}`;
-      const cached = answerCache.get(cacheKey);
-      const cachedContainsDeprecatedStoreLink =
-        cached?.value.includes("amazon.fr/stores/") || cached?.value.includes("amazon.nl/stores/");
-      if (cached && cached.expiresAt > Date.now() && !cachedContainsDeprecatedStoreLink) {
-        const recommendation = resolveAmazonRecommendation(cached.value, locale);
-        const productType = await classifyProblemTypeWithLlm(searchQuery, locale);
-        startSse(res);
-        sseWrite(res, { delta: cached.value, sessionId, audience }, "chunk");
-        await saveMessage(sessionId, "assistant", cached.value);
-        fireAndForget(
-          logQuery({
-            sessionId,
-            locale,
-            audience,
-            fluidType: fluid,
-            query: queryForRetrieval,
-            responseMs: Date.now() - startedAt,
-            status: "cache_hit",
-          }),
-          "logQuery.cache_hit",
-        );
-        fireAndForget(
-          logProductAnalytics({
-            sessionId,
-            locale,
-            audience,
-            query: queryForRetrieval,
-            recommendedProduct: recommendation.productName,
-            amazonUrl: recommendation.amazonUrl,
-            problemType: productType.problemType,
-            status: "cache_hit",
-          }),
-          "logProductAnalytics.cache_hit",
-        );
-        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
-        res.end();
-        return;
-      }
 
       const history = toHistoryPrompt(historyMessages);
       const ongoingConversation = hasOngoingConversation(historyMessages);
@@ -987,14 +999,60 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         });
       }
 
+      const cacheKey = buildAnswerCacheKey(locale, audience, effectiveTheme, queryForRetrieval, allPenalizedSlugs);
+      const cached = answerCache.get(cacheKey);
+      const cachedContainsDeprecatedStoreLink =
+        cached?.value.includes("amazon.fr/stores/") || cached?.value.includes("amazon.nl/stores/");
+      if (cached && cached.expiresAt > Date.now() && !cachedContainsDeprecatedStoreLink) {
+        const recommendation = resolveAmazonRecommendation(cached.value, locale);
+        const productType = await classifyProblemTypeWithLlm(searchQuery, locale);
+        startSse(res);
+        sseWrite(res, { delta: cached.value, sessionId, audience }, "chunk");
+        await saveMessage(sessionId, "assistant", cached.value);
+        fireAndForget(
+          logQuery({
+            sessionId,
+            locale,
+            audience,
+            fluidType: fluid,
+            query: queryForRetrieval,
+            responseMs: Date.now() - startedAt,
+            status: "cache_hit",
+          }),
+          "logQuery.cache_hit",
+        );
+        fireAndForget(
+          logProductAnalytics({
+            sessionId,
+            locale,
+            audience,
+            query: queryForRetrieval,
+            recommendedProduct: recommendation.productName,
+            amazonUrl: recommendation.amazonUrl,
+            problemType: productType.problemType,
+            status: "cache_hit",
+          }),
+          "logProductAnalytics.cache_hit",
+        );
+        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        res.end();
+        return;
+      }
+
       const factualProductMode =
         isFactualProductQuestion(citationScanText) && catalogCitation.best != null;
 
       if (env.PRODUCT_KNOWLEDGE_ENABLED && catalogSize > 0) {
         if (factualProductMode) {
-          pkResolvedProducts = catalogCitation.best
-            ? [catalogCitation.best]
-            : catalogCitation.products.slice(0, 1);
+          pkResolvedProducts = filterProductKnowledgeByQueryContext(
+            filterProductKnowledgeByPenalties(
+              catalogCitation.best ? [catalogCitation.best] : catalogCitation.products.slice(0, 1),
+              feedbackCtx.sessionPenalizeSlugs,
+              feedbackCtx.penalizeSlugs,
+            ),
+            queryForRetrieval,
+            effectiveTheme,
+          );
           pkProductSlugs = pkResolvedProducts.map((p) => p.slug);
           resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkResolvedProducts, pkRenderContext);
           retrievalPath = "product_knowledge";
@@ -1019,8 +1077,16 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
             feedbackAdjustments,
           });
           pkRouteTags = pkRoute.tags;
-          pkResolvedProducts = pkRoute.products;
-          if (pkRoute.products.length > 0) {
+          pkResolvedProducts = filterProductKnowledgeByQueryContext(
+            filterProductKnowledgeByPenalties(
+              pkRoute.products,
+              feedbackCtx.sessionPenalizeSlugs,
+              feedbackCtx.penalizeSlugs,
+            ),
+            queryForRetrieval,
+            effectiveTheme,
+          );
+          if (pkResolvedProducts.length > 0) {
             pkProductSlugs = pkRoute.products.map((p) => p.slug);
             resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkRoute.products, pkRenderContext);
             retrievalPath = "product_knowledge";
@@ -1146,7 +1212,11 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
             ],
           },
         );
-        resolvedNodes = filterRetrievalNodesByFeedbackPenalties(resolvedNodes, allPenalizedSlugs);
+        resolvedNodes = filterRetrievalNodesByFeedbackPenalties(
+          resolvedNodes,
+          feedbackCtx.penalizeSlugs,
+          feedbackCtx.sessionPenalizeSlugs,
+        );
         preTechnicalFilterCount = retrievalCount;
 
         const catalogAnchor = await searchProductKnowledge({
@@ -1490,6 +1560,12 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
       }
 
       answer = stripLeadingConversationGreeting(answer, ongoingConversation);
+      const contradictedBefore = answerContradictsRecommendation(answer);
+      answer = stripContradictoryProductRecommendation(answer);
+      if (contradictedBefore) {
+        console.warn("[/api/chat] contradictory_recommendation_stripped", { sessionId });
+        sseWrite(res, { replaceContent: answer, sessionId, audience }, "chunk");
+      }
       if (productFollowUp && priorRecommendedProduct) {
         answer = compactProductFollowUpAnswer(answer, priorRecommendedProduct);
       }

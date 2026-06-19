@@ -6,6 +6,7 @@ import type { StoredMessage } from "../types/index.js";
 import { isProfileOnlyMessage, isThemeOnlyMessage, isThemeUncertaintyMessage } from "./locale.js";
 import { mentionsLikelyProductPhrase } from "./product-mention.js";
 import { isYesNoAnswer } from "./response.js";
+import { normalizeText } from "./text.js";
 
 export type StoredMessageWithFeedback = StoredMessage & {
   id?: string;
@@ -79,6 +80,56 @@ export function resolveFeedbackProductCorrectionContext(
     : [];
 
   return { trainingQuery, dislikedProductSlugs };
+}
+
+function isUserProductCorrectionMessage(message: string): boolean {
+  const n = normalizeText(message);
+  if (!mentionsLikelyProductPhrase(message)) return false;
+  return /\b(plutot|plutôt|je pensais|je pensais|pas plutot|pas plutôt|c est plutot|c'est plutot|serait plutot|serait plutôt|ne serait pas plutot|ne serait pas plutôt|je pense que c est|je pense que c'est)\b/.test(
+    n,
+  );
+}
+
+/**
+ * Utilisateur corrige la reco (avec ou sans 👎 explicite sur le tour précédent).
+ * Ex. « je pensais plutôt au colmateur » ou « ce serait le mastic pose facile ? »
+ */
+export function resolveUserProductCorrectionContext(
+  historyMessages: StoredMessageWithFeedback[],
+  currentMessage: string,
+): FeedbackProductCorrectionContext | null {
+  if (!isUserProductCorrectionMessage(currentMessage)) return null;
+
+  const trainingQuery =
+    findFirstSubstantiveUserQuestion(historyMessages) ?? currentMessage.trim();
+
+  const dislikedProductSlugs: string[] = [];
+  for (let i = historyMessages.length - 1; i >= 0; i--) {
+    const row = historyMessages[i];
+    if (row?.role !== "assistant") continue;
+    const slugs = row.response_context?.product_slugs;
+    if (Array.isArray(slugs)) {
+      for (const s of slugs) {
+        const slug = String(s);
+        if (slug.length > 2) dislikedProductSlugs.push(slug);
+      }
+    }
+    if (row.user_feedback === -1 || dislikedProductSlugs.length > 0) break;
+    if (dislikedProductSlugs.length === 0 && /###\s*📦\s*Produit Recommand/i.test(row.content)) break;
+  }
+
+  return { trainingQuery, dislikedProductSlugs };
+}
+
+/** Correction après 👎 ou correction textuelle utilisateur. */
+export function resolveAnyProductCorrectionContext(
+  historyMessages: StoredMessageWithFeedback[],
+  currentMessage: string,
+): FeedbackProductCorrectionContext | null {
+  return (
+    resolveFeedbackProductCorrectionContext(historyMessages, currentMessage) ??
+    resolveUserProductCorrectionContext(historyMessages, currentMessage)
+  );
 }
 
 /** Message court citant un produit → ne pas diluer avec tout l'historique pour le matching catalogue. */

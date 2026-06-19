@@ -58,13 +58,46 @@ export function hasObviousLeakOrPipeDamageIntent(text: string): boolean {
   return (leak && conduit) || midSpanLeak || repairOnRigid;
 }
 
+/** Fuite / perte d'eau piscine (générique) — colmateur ou réparation liner selon contexte. */
+export function isPiscineLeakContext(text: string, sessionTheme?: string | null): boolean {
+  const n = normalizeText(text);
+  const themePiscine = sessionTheme === "piscine";
+  if (!/\bpiscine\b/.test(n) && !themePiscine) return false;
+  return (
+    /\b(fuite|fuit|fuites|perd|perte|colmat|micro[- ]?fuite|lekdichter|niveau\s+d[\s']?eau|eau\s+baisse|baisse\s+regulierement)\b/.test(
+      n,
+    ) || /\b(boucher|colmateur)\b/.test(n)
+  );
+}
+
 /** Fuite sur réseau piscine (canalisations enterrées / sans accès) — colmateur, pas mastic surface ni résine raccord. */
 export function isPiscineInaccessiblePipeLeak(text: string): boolean {
   const n = normalizeText(text);
-  if (!/\bpiscine\b/.test(n)) return false;
-  if (!/\b(fuite|fuit|perd|colmat|micro[- ]?fuite|lekdichter)\b/.test(n)) return false;
+  if (!isPiscineLeakContext(text)) return false;
   return /\b(inaccessible|inacessible|pas\s+d[\s']?acces|enterr|enterre|souterrain|canalisation|tuyau|conduit)\b/.test(
     n,
+  );
+}
+
+const SANITARY_FIXTURE_RE =
+  /\b(baignoire|baignoires|douche|receveur|lavabo|evier|wc|toilettes?|sanitaire|appareil\s+sanitaire|email|emaillage)\b/;
+
+/** Joint / mastic / silicone sur appareil sanitaire visible (baignoire, douche, évier…) — pas pâte filetage. */
+export function isSanitaryFixtureSealingContext(text: string): boolean {
+  const n = normalizeText(text);
+  if (!SANITARY_FIXTURE_RE.test(n)) return false;
+  return /\b(joint|mastic|silicone|etancheite|etancher|scellement|colle)\b/.test(n);
+}
+
+/** Slugs catalogue à exclure pour un contexte sanitaire surface (filetage / échappement / colle PVC). */
+export function isThreadPasteOrPlumbingInternalSlug(slug: string, title = ""): boolean {
+  const s = normalizeText(slug.replace(/-/g, " "));
+  const t = normalizeText(title);
+  const combined = `${s} ${t}`;
+  return (
+    /\b(gebatout|pate\s+a\s+joint|pate\s+joint|filasse|ptfe|olifan|echappement|collex|gebsoplast|resine\s+detancheite|resine\s+d\s+etancheite)\b/.test(
+      combined,
+    ) || (/\bfiletage\b/.test(combined) && !/\b(sanitaire|baignoire|douche)\b/.test(combined))
   );
 }
 

@@ -8,7 +8,12 @@ import {
   parseJointServiceFluid,
   userRejectsPiscineProduct,
 } from "../utils/joint-paste.js";
-import { hasInaccessibleThreadedJointForResinContext } from "../utils/diagnostic-rules.js";
+import {
+  hasInaccessibleThreadedJointForResinContext,
+  isPiscineLeakContext,
+  isSanitaryFixtureSealingContext,
+  isThreadPasteOrPlumbingInternalSlug,
+} from "../utils/diagnostic-rules.js";
 import {
   feedbackSlugScoreDelta,
   type FeedbackSlugAdjustments,
@@ -160,6 +165,28 @@ function scoreProduct(
     (tags.includes("piscine") || (/\bpiscine\b/.test(q) && !/\beau\s+potable\b/.test(q)));
   if (piscineContext) {
     if (title.includes("pool") || title.includes("piscine") || slug.includes("pool")) score += 6;
+  }
+
+  const piscineLeak = isPiscineLeakContext(query, sessionTheme);
+  if (piscineLeak) {
+    const wantsColmatage =
+      /\b(colmateur|colmat|boucher|bouch|fuites?|fuit|perd|niveau\s+d[\s']?eau|eau\s+baisse)\b/.test(q);
+    if (wantsColmatage) {
+      if (
+        title.includes("colmateur") ||
+        slug.includes("colmateur") ||
+        slug.includes("lekdichter") ||
+        slug.includes("zatykania-wyciek")
+      ) {
+        score += 48;
+      }
+      if (slug.includes("detection-fuite") || title.includes("detection")) score -= 35;
+      if (slug.includes("mastic") && slug.includes("reparation")) score -= 8;
+      if (slug.includes("mastic-piscine") || title.includes("mastic piscine")) score -= 28;
+    }
+    if (slug.includes("echappement") || slug.includes("collex") || title.includes("echappement")) score -= 55;
+    if (slug.includes("gebetanche") || slug.includes("resine")) score -= 28;
+    if (slug.includes("pate-a-joint") || slug.includes("gebatout")) score -= 45;
   }
 
   const poolInaccessiblePipeLeak =
@@ -357,8 +384,23 @@ function scoreProduct(
   }
 
   const siliconeContext = /\b(silicone|mastic\s+sanitaire)\b/.test(q);
+  const sanitaryFixture = isSanitaryFixtureSealingContext(query);
   const fastDryAsk = /\b(rapide|plus\s+rapide|sechage|seche|secher|sechage\s+rapide)\b/.test(q);
   const chronoExplicit = /\b(60\s*(?:min|mn)?\s*chrono|silicone\s+60|60\s*chrono|\bchrono\b)/.test(q);
+
+  if (sanitaryFixture) {
+    if (
+      slug.includes("pose-facile") ||
+      title.includes("pose facile") ||
+      (slug.includes("silicone") && (slug.includes("bain") || slug.includes("sanitaire"))) ||
+      title.includes("silicone sanitaire")
+    ) {
+      score += 38;
+    }
+    if (slug.includes("mastic") && (slug.includes("facile") || title.includes("facile"))) score += 32;
+    if (isThreadPasteOrPlumbingInternalSlug(product.slug, product.canonical_name)) score -= 50;
+    if (slug.includes("echappement") || slug.includes("collex")) score -= 55;
+  }
 
   if (siliconeContext) {
     if (title.includes("graisse") && slug.includes("graisse")) score -= 30;
@@ -426,6 +468,10 @@ const NAME_KEYWORD_PATTERNS: Array<{ pattern: RegExp; term: string }> = [
   { pattern: /\bliner\b/i, term: "liner" },
   { pattern: /\bcolmateur\b/i, term: "colmateur" },
   { pattern: /\bmicro[- ]?fuites?\b/i, term: "colmateur" },
+  {
+    pattern: /\b(piscine|pool|bassin)\b.*\b(fuite|fuites|fuit|perd|boucher|colmat|niveau)\b/i,
+    term: "colmateur",
+  },
   { pattern: /\b(debouch|deboucheur)\b/i, term: "debouch" },
   { pattern: /\b(desembou|g3\b|g70\b)\b/i, term: "desembou" },
   { pattern: /\b(inhibiteur|g110|g10\b)\b/i, term: "inhibiteur" },
@@ -449,6 +495,7 @@ function extractNameSearchTerms(
   query: string,
   tags: string[],
   sessionAudience?: Audience | null,
+  sessionTheme?: ProductTheme | null,
 ): string[] {
   const terms = new Set<string>();
   const q = normalizeText(query);
@@ -479,6 +526,13 @@ function extractNameSearchTerms(
       continue;
     }
     terms.add(term);
+  }
+  if (
+    sessionTheme === "piscine" &&
+    /\b(fuite|fuites|fuit|perd|boucher|colmat|niveau|baisse)\b/.test(q)
+  ) {
+    terms.add("colmateur");
+    terms.add("pool");
   }
   if (/\b(silicone|mastic)\b/.test(q) && /\b(rapide|sechage|seche|secher|plus\s+rapide)\b/.test(q)) {
     terms.add("chrono");
@@ -596,6 +650,59 @@ async function fetchCandidates(
   return (data as ProductKnowledgeRow[]) ?? [];
 }
 
+function slugMatchesPenalty(slug: string, penalizeSlugs: string[]): boolean {
+  const norm = normalizeText(slug);
+  return penalizeSlugs.some((target) => {
+    const t = normalizeText(target);
+    return norm.includes(t) || t.includes(norm);
+  });
+}
+
+/** Remove catalogue rows incompatible with query context (sanitary surface vs filetage, piscine vs échappement). */
+export function filterProductKnowledgeByQueryContext(
+  products: ProductKnowledgeRow[],
+  queryText: string,
+  sessionTheme?: ProductTheme | null,
+): ProductKnowledgeRow[] {
+  if (products.length === 0) return products;
+  const q = queryText;
+
+  let filtered = products;
+  if (isSanitaryFixtureSealingContext(q)) {
+    const next = filtered.filter((p) => !isThreadPasteOrPlumbingInternalSlug(p.slug, p.canonical_name));
+    if (next.length > 0) filtered = next;
+  }
+  if (isPiscineLeakContext(q, sessionTheme)) {
+    const next = filtered.filter((p) => {
+      const s = normalizeText(p.slug);
+      const t = normalizeText(p.canonical_name);
+      if (s.includes("echappement") || s.includes("collex") || t.includes("echappement")) return false;
+      if (isThreadPasteOrPlumbingInternalSlug(p.slug, p.canonical_name)) return false;
+      return true;
+    });
+    if (next.length > 0) filtered = next;
+  }
+  return filtered;
+}
+
+/** Drop session-disliked slugs entirely; global penalties only when alternatives remain. */
+export function filterProductKnowledgeByPenalties(
+  products: ProductKnowledgeRow[],
+  sessionPenalizeSlugs: string[],
+  globalPenalizeSlugs: string[] = [],
+): ProductKnowledgeRow[] {
+  if (products.length === 0) return products;
+
+  if (sessionPenalizeSlugs.length > 0) {
+    const withoutSession = products.filter((p) => !slugMatchesPenalty(p.slug, sessionPenalizeSlugs));
+    if (withoutSession.length > 0) return withoutSession;
+  }
+
+  if (globalPenalizeSlugs.length === 0) return products;
+  const withoutGlobal = products.filter((p) => !slugMatchesPenalty(p.slug, globalPenalizeSlugs));
+  return withoutGlobal.length > 0 ? withoutGlobal : products;
+}
+
 export async function searchProductKnowledge(input: ProductKnowledgeSearchInput): Promise<ProductKnowledgeRow[]> {
   const tags = input.tags ?? [];
   const limit = input.limit ?? 3;
@@ -607,7 +714,7 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
   const byTagsWithoutTheme =
     input.theme != null && !skipThemeHardFilter ? await fetchCandidates(input.locale, null, tags) : [];
 
-  const nameTerms = extractNameSearchTerms(queryText, tags, input.audience);
+  const nameTerms = extractNameSearchTerms(queryText, tags, input.audience, input.theme);
   const byName = await fetchByNameTerms(input.locale, nameTerms);
   const directProductLookup = explicitTexts.some(isExplicitProductLookupQuery);
   const byExplicitMention = directProductLookup

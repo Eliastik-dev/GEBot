@@ -371,6 +371,27 @@ function computeDemotionPenalty(
     }
   }
 
+  const piscineContext =
+    theme === "piscine" || /\b(piscine|pool|bassin|liner|skimmer)\b/.test(normalizeText(`${userQuery} ${searchQuery}`));
+  if (piscineContext && !automotiveContext) {
+    if (text.includes("echappement") || text.includes("collex")) {
+      penalty += 0.55;
+    }
+    if (text.includes("demarre moteur") || text.includes("startex")) {
+      penalty += 0.45;
+    }
+    if (text.includes("eau potable") && !text.includes("pool") && !text.includes("piscine")) {
+      penalty += 0.25;
+    }
+    if (
+      (text.includes("pate") && text.includes("joint")) ||
+      text.includes("gebatout") ||
+      text.includes("filasse")
+    ) {
+      penalty += 0.35;
+    }
+  }
+
   return penalty;
 }
 
