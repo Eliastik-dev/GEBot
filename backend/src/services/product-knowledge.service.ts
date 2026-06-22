@@ -685,22 +685,75 @@ export function filterProductKnowledgeByQueryContext(
   return filtered;
 }
 
-/** Drop session-disliked slugs entirely; global penalties only when alternatives remain. */
+/** Drop session / cross-session disliked slugs; soft global penalties only when alternatives remain. */
 export function filterProductKnowledgeByPenalties(
   products: ProductKnowledgeRow[],
   sessionPenalizeSlugs: string[],
   globalPenalizeSlugs: string[] = [],
+  crossSessionPenalizeSlugs: string[] = [],
 ): ProductKnowledgeRow[] {
   if (products.length === 0) return products;
 
-  if (sessionPenalizeSlugs.length > 0) {
-    const withoutSession = products.filter((p) => !slugMatchesPenalty(p.slug, sessionPenalizeSlugs));
-    if (withoutSession.length > 0) return withoutSession;
+  const hardSlugs = [
+    ...new Set([...sessionPenalizeSlugs, ...crossSessionPenalizeSlugs]),
+  ];
+  if (hardSlugs.length > 0) {
+    const withoutHard = products.filter((p) => !slugMatchesPenalty(p.slug, hardSlugs));
+    if (withoutHard.length > 0) return withoutHard;
   }
 
   if (globalPenalizeSlugs.length === 0) return products;
   const withoutGlobal = products.filter((p) => !slugMatchesPenalty(p.slug, globalPenalizeSlugs));
   return withoutGlobal.length > 0 ? withoutGlobal : products;
+}
+
+/** Ensure 👍 slugs (session or cross-session) appear in catalogue results — symmetric to hard penalize. */
+export async function injectFeedbackBoostProducts(
+  products: ProductKnowledgeRow[],
+  slugHints: string[],
+  locale: "fr" | "nl" | "pl",
+): Promise<ProductKnowledgeRow[]> {
+  if (slugHints.length === 0) return products;
+
+  const merged = new Map<string, ProductKnowledgeRow>(products.map((p) => [p.slug, p]));
+  const missingHints = slugHints.filter(
+    (hint) => ![...merged.keys()].some((slug) => slugMatchesPenalty(slug, [hint])),
+  );
+  if (missingHints.length === 0) return products;
+
+  for (const hint of missingHints) {
+    const exact = await getProductKnowledgeBySlug(hint, locale).catch(() => null);
+    if (exact) {
+      merged.set(exact.slug, exact);
+      continue;
+    }
+
+    const ilikePattern = hint.replace(/-/g, "%").slice(0, 48);
+    const { data, error } = await supabase
+      .from("product_knowledge")
+      .select("*")
+      .eq("locale", locale)
+      .ilike("slug", `%${ilikePattern}%`)
+      .limit(8);
+
+    if (error) continue;
+    for (const row of (data as ProductKnowledgeRow[]) ?? []) {
+      if (slugMatchesPenalty(row.slug, [hint])) {
+        merged.set(row.slug, row);
+        break;
+      }
+    }
+  }
+
+  const boostedFirst: ProductKnowledgeRow[] = [];
+  for (const hint of slugHints) {
+    const match = [...merged.values()].find((p) => slugMatchesPenalty(p.slug, [hint]));
+    if (match && !boostedFirst.some((p) => p.slug === match.slug)) {
+      boostedFirst.push(match);
+    }
+  }
+  const rest = [...merged.values()].filter((p) => !boostedFirst.some((b) => b.slug === p.slug));
+  return [...boostedFirst, ...rest];
 }
 
 export async function searchProductKnowledge(input: ProductKnowledgeSearchInput): Promise<ProductKnowledgeRow[]> {

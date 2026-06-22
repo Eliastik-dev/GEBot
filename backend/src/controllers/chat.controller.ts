@@ -11,7 +11,7 @@ import {
   expandRetrievalQueryWithLlm,
   queryWithRetryAndFallback,
 } from "../services/ai.service.js";
-import { resolveFeedbackRetrievalContext } from "../services/feedback-retrieval.service.js";
+import { hardBoostSlugs, hardPenalizeSlugs, resolveFeedbackRetrievalContext } from "../services/feedback-retrieval.service.js";
 import { ensureSession, getSessionTheme, loadRecentMessages, logProblemEvent, logProductAnalytics, logQuery, saveMessage, updateSessionAudience, updateSessionTheme } from "../services/database.service.js";
 import { scheduleJudgeEvaluation, type JudgeInput } from "../services/judge.service.js";
 import {
@@ -36,6 +36,7 @@ import {
   filterProductKnowledgeByPenalties,
   filterProductKnowledgeByQueryContext,
   getProductKnowledgeBySlug,
+  injectFeedbackBoostProducts,
   lookupCatalogProductsByCitation,
   lookupCitedCatalogProductForRecommendation,
   lookupExplicitCatalogProductForSheet,
@@ -105,17 +106,17 @@ function nodeSlugFromRetrievalItem(item: unknown): string {
 function filterRetrievalNodesByFeedbackPenalties(
   nodes: unknown[],
   penalizeSlugs: string[],
-  sessionPenalizeSlugs: string[] = [],
+  hardPenalizeSlugsList: string[] = [],
 ): unknown[] {
   if (nodes.length === 0) return nodes;
 
-  if (sessionPenalizeSlugs.length > 0) {
-    const withoutSession = nodes.filter((item) => {
+  if (hardPenalizeSlugsList.length > 0) {
+    const withoutHard = nodes.filter((item) => {
       const slug = nodeSlugFromRetrievalItem(item);
       if (!slug) return true;
-      return !sessionPenalizeSlugs.some((target) => slug.includes(target) || target.includes(slug));
+      return !hardPenalizeSlugsList.some((target) => slug.includes(target) || target.includes(slug));
     });
-    if (withoutSession.length > 0) return withoutSession;
+    if (withoutHard.length > 0) return withoutHard;
   }
 
   if (penalizeSlugs.length === 0) return nodes;
@@ -133,10 +134,12 @@ function buildAnswerCacheKey(
   theme: ProductTheme | null | undefined,
   queryForRetrieval: string,
   penaltySlugs: string[] = [],
+  boostSlugs: string[] = [],
 ): string {
   const penaltyKey =
     penaltySlugs.length > 0 ? penaltySlugs.slice().sort().join("|") : "none";
-  return `${ANSWER_CACHE_VERSION}|${locale}|${audience}|${theme ?? "none"}|${queryForRetrieval.toLowerCase()}|pen:${penaltyKey}`;
+  const boostKey = boostSlugs.length > 0 ? boostSlugs.slice().sort().join("|") : "none";
+  return `${ANSWER_CACHE_VERSION}|${locale}|${audience}|${theme ?? "none"}|${queryForRetrieval.toLowerCase()}|pen:${penaltyKey}|boost:${boostKey}`;
 }
 
 export async function postChat(req: Request, res: Response, deps: ChatDeps) {
@@ -962,6 +965,8 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           sessionBoostSlugs: [] as string[],
           penalizeSlugs: [] as string[],
           sessionPenalizeSlugs: [] as string[],
+          crossSessionPenalizeSlugs: [] as string[],
+          crossSessionBoostSlugs: [] as string[],
           goldenExamples: [] as Array<{ userQuery: string; assistantReply: string }>,
           negativeExamples: [] as Array<{
             userQuery: string;
@@ -976,15 +981,24 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         sessionBoostSlugs: feedbackCtx.sessionBoostSlugs,
         penalizeSlugs: feedbackCtx.penalizeSlugs,
         sessionPenalizeSlugs: feedbackCtx.sessionPenalizeSlugs,
+        crossSessionPenalizeSlugs: feedbackCtx.crossSessionPenalizeSlugs,
+        crossSessionBoostSlugs: feedbackCtx.crossSessionBoostSlugs,
       };
+      const feedbackHardPenalties = hardPenalizeSlugs(feedbackAdjustments);
+      const feedbackHardBoosts = hardBoostSlugs(feedbackAdjustments);
       const allPenalizedSlugs = [
-        ...new Set([...feedbackCtx.penalizeSlugs, ...feedbackCtx.sessionPenalizeSlugs]),
+        ...new Set([
+          ...feedbackCtx.penalizeSlugs,
+          ...feedbackHardPenalties,
+        ]),
       ];
       if (
         feedbackCtx.boostSlugs.length > 0 ||
         feedbackCtx.sessionBoostSlugs.length > 0 ||
+        feedbackCtx.crossSessionBoostSlugs.length > 0 ||
         feedbackCtx.penalizeSlugs.length > 0 ||
         feedbackCtx.sessionPenalizeSlugs.length > 0 ||
+        feedbackCtx.crossSessionPenalizeSlugs.length > 0 ||
         feedbackCtx.goldenExamples.length > 0 ||
         feedbackCtx.negativeExamples.length > 0
       ) {
@@ -992,14 +1006,23 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           sessionId,
           boost: feedbackCtx.boostSlugs,
           sessionBoost: feedbackCtx.sessionBoostSlugs,
+          crossSessionBoost: feedbackCtx.crossSessionBoostSlugs,
           penalize: feedbackCtx.penalizeSlugs,
           sessionPenalize: feedbackCtx.sessionPenalizeSlugs,
+          crossSessionPenalize: feedbackCtx.crossSessionPenalizeSlugs,
           golden: feedbackCtx.goldenExamples.length,
           negative: feedbackCtx.negativeExamples.length,
         });
       }
 
-      const cacheKey = buildAnswerCacheKey(locale, audience, effectiveTheme, queryForRetrieval, allPenalizedSlugs);
+      const cacheKey = buildAnswerCacheKey(
+        locale,
+        audience,
+        effectiveTheme,
+        queryForRetrieval,
+        allPenalizedSlugs,
+        feedbackHardBoosts,
+      );
       const cached = answerCache.get(cacheKey);
       const cachedContainsDeprecatedStoreLink =
         cached?.value.includes("amazon.fr/stores/") || cached?.value.includes("amazon.nl/stores/");
@@ -1049,9 +1072,15 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
               catalogCitation.best ? [catalogCitation.best] : catalogCitation.products.slice(0, 1),
               feedbackCtx.sessionPenalizeSlugs,
               feedbackCtx.penalizeSlugs,
+              feedbackCtx.crossSessionPenalizeSlugs,
             ),
             queryForRetrieval,
             effectiveTheme,
+          );
+          pkResolvedProducts = await injectFeedbackBoostProducts(
+            pkResolvedProducts,
+            feedbackHardBoosts,
+            pkLocale,
           );
           pkProductSlugs = pkResolvedProducts.map((p) => p.slug);
           resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkResolvedProducts, pkRenderContext);
@@ -1082,13 +1111,19 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
               pkRoute.products,
               feedbackCtx.sessionPenalizeSlugs,
               feedbackCtx.penalizeSlugs,
+              feedbackCtx.crossSessionPenalizeSlugs,
             ),
             queryForRetrieval,
             effectiveTheme,
           );
+          pkResolvedProducts = await injectFeedbackBoostProducts(
+            pkResolvedProducts,
+            feedbackHardBoosts,
+            pkLocale,
+          );
           if (pkResolvedProducts.length > 0) {
-            pkProductSlugs = pkRoute.products.map((p) => p.slug);
-            resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkRoute.products, pkRenderContext);
+            pkProductSlugs = pkResolvedProducts.map((p) => p.slug);
+            resolvedNodes = buildRetrieverNodesFromProductKnowledge(pkResolvedProducts, pkRenderContext);
             retrievalPath = "product_knowledge";
             retrievalCount = resolvedNodes.length;
             preTechnicalFilterCount = retrievalCount;
@@ -1098,9 +1133,10 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
               retrievalCount,
               slugs: pkProductSlugs,
               resolvedTags: pkRouteTags,
-              productTags: pkRoute.products.flatMap((p) => p.use_case_tags),
+              productTags: pkResolvedProducts.flatMap((p) => p.use_case_tags),
+              feedbackBoost: feedbackHardBoosts,
             });
-            const debugNodes = pkRoute.products.map((p) => summarizeProductKnowledgeForDebug(p));
+            const debugNodes = pkResolvedProducts.map((p) => summarizeProductKnowledgeForDebug(p));
             console.log("[/api/chat] retrieval_debug_product_knowledge", {
               sessionId,
               query: searchQuery,
@@ -1215,7 +1251,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         resolvedNodes = filterRetrievalNodesByFeedbackPenalties(
           resolvedNodes,
           feedbackCtx.penalizeSlugs,
-          feedbackCtx.sessionPenalizeSlugs,
+          feedbackHardPenalties,
         );
         preTechnicalFilterCount = retrievalCount;
 
