@@ -30,17 +30,18 @@ function defaultMeta(testCase: RetrievalRegressionCase): ExtractedMetadata {
     safety_keywords: [],
     missing_params: [],
     needs_clarification: false,
-    synonyms: [],
+    synonyms: testCase.synonyms ?? [],
     method: "fallback",
   };
 }
 
 async function runCase(testCase: RetrievalRegressionCase): Promise<{ ok: boolean; slugs: string[]; reason?: string }> {
   const meta = defaultMeta(testCase);
+  const searchQuery = testCase.searchQuery ?? testCase.query;
   const { products, tags } = await routeProductKnowledge({
     locale: testCase.locale,
     query: testCase.query,
-    searchQuery: testCase.query,
+    searchQuery,
     userQuery: testCase.query,
     theme: testCase.theme,
     metadata: meta,

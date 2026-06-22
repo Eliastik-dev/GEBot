@@ -22,7 +22,7 @@ import {
   categoryToUseCaseTags,
   parseJointServiceFluid,
 } from "../utils/joint-paste.js";
-import { searchProductKnowledge } from "./product-knowledge.service.js";
+import { searchProductKnowledge, filterProductKnowledgeByQueryContext } from "./product-knowledge.service.js";
 import type { FeedbackSlugAdjustments } from "./feedback-retrieval.service.js";
 import {
   buildCatalogMismatchHints,
@@ -52,7 +52,7 @@ function normalizeText(value: string): string {
 
 /** Map user query + intent + theme to product_knowledge.use_case_tags filters. */
 export function resolveUseCaseTags(input: ProductRouterInput): string[] {
-  const combinedText = `${input.query} ${input.searchQuery}`;
+  const combinedText = [input.userQuery, input.query, input.searchQuery].filter(Boolean).join(" ");
   if (isPersonalDrinkwareOutOfCatalog(combinedText)) {
     return [];
   }
@@ -338,7 +338,7 @@ export async function routeProductKnowledge(input: ProductRouterInput): Promise<
   products: ProductKnowledgeRow[];
   tags: string[];
 }> {
-  const combined = `${input.query}\n${input.searchQuery}`;
+  const combined = [input.userQuery, input.query, input.searchQuery].filter(Boolean).join("\n");
   if (isPersonalDrinkwareOutOfCatalog(combined)) {
     return { products: [], tags: [] };
   }
@@ -360,7 +360,11 @@ export async function routeProductKnowledge(input: ProductRouterInput): Promise<
     ...(input.feedbackAdjustments ? { feedbackAdjustments: input.feedbackAdjustments } : {}),
   });
 
-  return { products, tags };
+  const queryText = combined;
+  return {
+    products: filterProductKnowledgeByQueryContext(products, queryText, input.theme),
+    tags,
+  };
 }
 
 export function summarizeProductKnowledgeForDebug(product: ProductKnowledgeRow): Record<string, string | string[]> {

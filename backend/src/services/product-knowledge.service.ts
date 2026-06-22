@@ -669,8 +669,14 @@ export function filterProductKnowledgeByQueryContext(
 
   let filtered = products;
   if (isSanitaryFixtureSealingContext(q)) {
-    const next = filtered.filter((p) => !isThreadPasteOrPlumbingInternalSlug(p.slug, p.canonical_name));
-    if (next.length > 0) filtered = next;
+    const siliconeTagged = filtered.filter((p) =>
+      p.use_case_tags.some((tag) => normalizeText(tag) === "silicone_sanitaire"),
+    );
+    if (siliconeTagged.length > 0) {
+      filtered = siliconeTagged;
+    } else {
+      filtered = filtered.filter((p) => !isThreadPasteOrPlumbingInternalSlug(p.slug, p.canonical_name));
+    }
   }
   if (isPiscineLeakContext(q, sessionTheme)) {
     const next = filtered.filter((p) => {
@@ -799,6 +805,7 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
 
   if (candidates.length === 0) return [];
 
+  const sanitaryContext = isSanitaryFixtureSealingContext(queryText);
   const scored = candidates
     .map((product) => {
       let score = scoreProduct(
@@ -820,7 +827,9 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
       (item) =>
         item.score > 0 ||
         explicitSlugs.has(item.product.slug) ||
-        item.explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN,
+        item.explicitScore >= EXPLICIT_PRODUCT_MATCH_MIN ||
+        (sanitaryContext &&
+          item.product.use_case_tags.some((tag) => normalizeText(tag) === "silicone_sanitaire")),
     )
     .sort((a, b) => {
       const aStrong = a.explicitScore >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN;
@@ -842,10 +851,77 @@ export async function searchProductKnowledge(input: ProductKnowledgeSearchInput)
 
   const strongExplicit = scored.filter((item) => item.explicitScore >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN);
   if (strongExplicit.length > 0) {
-    return strongExplicit.slice(0, limit).map((item) => item.product);
+    const explicitPicked = pickSanitaryAwareProducts(strongExplicit, queryText, limit);
+    const explicitHasSilicone =
+      explicitPicked.length > 0 &&
+      explicitPicked.some((product) =>
+        product.use_case_tags.some((tag) => normalizeText(tag) === "silicone_sanitaire"),
+      );
+    if (
+      explicitHasSilicone ||
+      !sanitaryContext ||
+      !tags.some((tag) => normalizeText(tag) === "silicone_sanitaire")
+    ) {
+      return explicitPicked;
+    }
   }
 
-  return scored.slice(0, limit).map((item) => item.product);
+  const picked = pickSanitaryAwareProducts(scored, queryText, limit);
+  const pickedHasSilicone =
+    picked.length > 0 &&
+    picked.some((product) =>
+      product.use_case_tags.some((tag) => normalizeText(tag) === "silicone_sanitaire"),
+    );
+  if (
+    pickedHasSilicone ||
+    !sanitaryContext ||
+    !tags.some((tag) => normalizeText(tag) === "silicone_sanitaire")
+  ) {
+    return picked;
+  }
+
+  const siliconeCatalog = candidates.filter((product) =>
+    product.use_case_tags.some((tag) => normalizeText(tag) === "silicone_sanitaire"),
+  );
+  if (siliconeCatalog.length === 0) return picked;
+
+  const siliconeScored = siliconeCatalog
+    .map((product) => ({
+      product,
+      score: scoreProduct(
+        product,
+        tags,
+        input.material,
+        input.fluid,
+        queryText,
+        input.audience,
+        input.theme,
+        explicitTexts,
+      ),
+      explicitScore: computeExplicitProductMatchScore(product, explicitTexts),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  return siliconeScored.slice(0, limit).map((item) => item.product);
+}
+
+function pickSanitaryAwareProducts(
+  scored: Array<{ product: ProductKnowledgeRow; score: number; explicitScore: number }>,
+  queryText: string,
+  limit: number,
+): ProductKnowledgeRow[] {
+  let pool = scored;
+  if (isSanitaryFixtureSealingContext(queryText)) {
+    const siliconeTagged = scored.filter((item) =>
+      item.product.use_case_tags.some((tag) => normalizeText(tag) === "silicone_sanitaire"),
+    );
+    const withoutThreadPaste = scored.filter(
+      (item) => !isThreadPasteOrPlumbingInternalSlug(item.product.slug, item.product.canonical_name),
+    );
+    if (siliconeTagged.length > 0) pool = siliconeTagged;
+    else if (withoutThreadPaste.length > 0) pool = withoutThreadPaste;
+  }
+  return pool.slice(0, limit).map((item) => item.product);
 }
 
 export async function getProductKnowledgeBySlug(

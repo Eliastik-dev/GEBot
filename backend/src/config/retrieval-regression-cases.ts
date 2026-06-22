@@ -16,6 +16,10 @@ export type RetrievalRegressionCase = {
   /** When true, routing must return zero products (hors catalogue). */
   expectNoProducts?: boolean;
   intent?: string;
+  /** Polluted retrieval query as built in /api/chat (theme + metadata enrichment). */
+  searchQuery?: string;
+  /** Metadata synonyms as extracted in prod before sanitizer. */
+  synonyms?: string[];
 };
 
 /** Golden routing cases — extend when new misroutes are reported via feedback. */
@@ -303,6 +307,19 @@ export const RETRIEVAL_REGRESSION_CASES: RetrievalRegressionCase[] = [
     expectedSlugs: ["silicone-bain-cuisine", "geborizon-silicone-sanitaire"],
     forbiddenSlugs: ["gebatout", "pate-a-joint-eau-potable", "pate-de-montage-echappement-collex"],
     intent: "silicone_application",
+  },
+  {
+    id: "sanitaire-joint-baignoire-prod-polluted-search",
+    locale: "fr",
+    theme: "plomberie",
+    audience: "particulier",
+    query: "Je recherche un mastic à l'eau pour faire le joint autour de ma baignoire",
+    searchQuery:
+      "Je recherche un mastic à l'eau pour faire le joint autour de ma baignoire joint étanchéité raccord filetage PTFE ruban ptfe filasse pate joint eau potable",
+    intent: "sealing_assembly",
+    synonyms: ["étanchéité", "joint", "raccord", "filetage", "PTFE", "ruban"],
+    expectedSlugs: ["silicone-pose-facile", "silicone-bain-cuisine", "geborizon-silicone-sanitaire"],
+    forbiddenSlugs: ["pate-a-joint-eau-potable", "gebatout", "kit-etancheite-eau-potable"],
   },
   {
     id: "pate-joint-eau-potable-nom-produit",

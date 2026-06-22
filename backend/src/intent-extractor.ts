@@ -77,6 +77,7 @@ import {
   isBuildingEnvelopeLeakContext,
   isBuildingSurfaceSealingContext,
   isPersonalDrinkwareOutOfCatalog,
+  isSanitaryFixtureSealingContext,
 } from "./utils/diagnostic-rules.js";
 import { mentionsLikelyProductPhrase } from "./utils/product-mention.js";
 
@@ -372,7 +373,7 @@ function buildSynonyms(intent: Intent, fluid: string | null, material: string | 
 
   if (intentSynonyms[intent]) synonyms.push(...intentSynonyms[intent]!);
 
-  // Context-aware sealing synonyms: plumbing vs. building surfaces
+  // Context-aware sealing synonyms: plumbing vs. building surfaces vs. sanitary fixtures
   if (intent === "sealing_assembly") {
     if (material && /carrelage|terrasse|balcon|dalle|beton|pierre|facade|mur|sol|brique/.test(material)) {
       synonyms.push("mastic", "acrylique", "joint carrelage", "fissure", "terrasse", "étanchéité bâtiment", "exthane");
@@ -576,6 +577,33 @@ function applyPersonalDrinkwareSanitizer(merged: ExtractedMetadata, conversation
   if (!merged.fluid) merged.fluid = "eau";
 }
 
+/** Joint mastic/silicone sur baignoire, douche, évier… — pas pâte à joint filetage. */
+function applySanitaryFixtureSanitizer(merged: ExtractedMetadata, conversationText: string): void {
+  if (!isSanitaryFixtureSealingContext(conversationText)) return;
+
+  merged.intent = "silicone_application";
+  merged.fluid = null;
+  merged.damage_type = null;
+  merged.missing_params = merged.missing_params.filter(
+    (p) => !["joint_service_fluid", "fluid", "diameter", "pressure"].includes(p),
+  );
+  merged.needs_clarification = merged.missing_params.length > 0;
+  merged.confidence = Math.max(merged.confidence, 0.85);
+
+  const pollutant =
+    /raccord|filetage|ptfe|ruban|filasse|pate\s+joint|gebetanche|gebatout|echappement|collex|eau\s+potable|potable/i;
+  merged.synonyms = [
+    ...new Set([
+      ...merged.synonyms.filter((s) => !pollutant.test(s)),
+      "silicone",
+      "mastic sanitaire",
+      "joint sanitaire",
+      "pose facile",
+      "appareil sanitaire",
+    ]),
+  ];
+}
+
 function applyDescalingSanitizer(merged: ExtractedMetadata, conversationText: string): void {
   const leakLike: Intent[] = ["leak_repair", "pipe_repair", "inaccessible_leak"];
   if (leakLike.includes(merged.intent)) {
@@ -651,6 +679,18 @@ function applyJointServiceFluidAndNonLeakSanitizer(
   isLeakLike: boolean,
 ): void {
   const conversationText = `${transcript}\n${currentMessage}`;
+
+  if (isSanitaryFixtureSealingContext(conversationText)) {
+    merged.missing_params = merged.missing_params.filter(
+      (p) => !["joint_service_fluid", "fluid", "diameter", "pressure"].includes(p),
+    );
+    merged.fluid = null;
+    if (merged.missing_params.length === 0) merged.needs_clarification = false;
+    if (merged.intent === "sealing_assembly" || merged.intent === "leak_repair") {
+      merged.intent = "silicone_application";
+    }
+    return;
+  }
 
   if (isBuildingSurfaceSealingContext(conversationText)) {
     merged.missing_params = merged.missing_params.filter(
@@ -763,6 +803,13 @@ export async function runDiagnosticAnalysis(
         clarification_message: null,
       };
     }
+    if (isSanitaryFixtureSealingContext(conversationText)) {
+      applySanitaryFixtureSanitizer(m, conversationText);
+      return {
+        metadata: m,
+        clarification_message: null,
+      };
+    }
     const isLeakLikeFb = ["leak_repair", "pipe_repair", "inaccessible_leak"].includes(fallback.intent);
     applyBuildingEnvelopeLeakEnrichment(m, conversationText);
     if (descalingContext) {
@@ -860,6 +907,8 @@ export async function runDiagnosticAnalysis(
     applyPersonalDrinkwareSanitizer(merged, conversationText);
   } else if (woodStoveCosmeticContext) {
     applyWoodStoveCosmeticSanitizer(merged);
+  } else if (isSanitaryFixtureSealingContext(conversationText)) {
+    applySanitaryFixtureSanitizer(merged, conversationText);
   } else if (descalingContext) {
     applyDescalingSanitizer(merged, conversationText);
   } else if (heatingCircuitContext) {

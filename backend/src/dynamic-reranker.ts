@@ -7,6 +7,7 @@
 
 import type { ExtractedMetadata, Intent } from "./intent-extractor.js";
 import type { ProductTheme } from "./types/index.js";
+import { isSanitaryFixtureSealingContext } from "./utils/diagnostic-rules.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -505,6 +506,16 @@ export function buildEnrichedSearchQuery(
   options?: { lite?: boolean },
 ): string {
   const lite = options?.lite ?? false;
+
+  if (isSanitaryFixtureSealingContext(baseQuestion) || metadata.intent === "silicone_application") {
+    const terms = new Set<string>(["silicone", "mastic sanitaire", "joint sanitaire"]);
+    const pollutant = /raccord|filetage|ptfe|ruban|filasse|pate\s+joint|gebetanche|gebatout|echappement|potable/i;
+    for (const syn of metadata.synonyms) {
+      if (!pollutant.test(syn)) terms.add(syn);
+    }
+    return `${baseQuestion} ${Array.from(terms).join(" ")}`.trim();
+  }
+
   const terms = new Set<string>();
 
   // Add synonyms from intent classification

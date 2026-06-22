@@ -3,7 +3,7 @@ import { SupabaseVectorStore } from "@llamaindex/supabase";
 import { env } from "../config/env.js";
 import { GEO_TIMEOUT_MS, RESELLER_CACHE_TTL_MS, RESELLER_DIRECTORY_URL, VECTOR_SEARCH_TIMEOUT_MS } from "../config/constants.js";
 import type { Locale, ProductTheme, Reseller, StoredMessage } from "../types/index.js";
-import { hasDescalingContext, hasHeatingCircuitContext, hasInaccessibleThreadedJointForResinContext, isJointSealingAssemblyWithoutLeak, isPersonalDrinkwareOutOfCatalog, isPurePipeLeakDamageTurn, isThinRetrievalQuery, userTurnRelevantToLeakRepairThread, hasObviousLeakOrPipeDamageIntent, isThreadedJointOrLiquidSealingTopic } from "../utils/diagnostic-rules.js";
+import { hasDescalingContext, hasHeatingCircuitContext, hasInaccessibleThreadedJointForResinContext, isJointSealingAssemblyWithoutLeak, isPersonalDrinkwareOutOfCatalog, isPurePipeLeakDamageTurn, isSanitaryFixtureSealingContext, isThinRetrievalQuery, userTurnRelevantToLeakRepairThread, hasObviousLeakOrPipeDamageIntent, isThreadedJointOrLiquidSealingTopic } from "../utils/diagnostic-rules.js";
 import { isProfileOnlyMessage, isThemeOnlyMessage } from "../utils/locale.js";
 import { mentionsLikelyProductPhrase } from "../utils/product-mention.js";
 import { isInformationalProductQuestion, normalizeText } from "../utils/text.js";
@@ -166,6 +166,10 @@ const THEME_SEARCH_EXPANSIONS: Record<ProductTheme, Array<{ pattern: RegExp; ter
 
 
 export function buildThemeAwareSearchQuery(baseQuestion: string, theme: ProductTheme): string {
+  if (isSanitaryFixtureSealingContext(baseQuestion)) {
+    return `${baseQuestion} silicone mastic sanitaire joint sanitaire`.trim();
+  }
+
   const normalized = baseQuestion.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const terms = new Set<string>();
 
