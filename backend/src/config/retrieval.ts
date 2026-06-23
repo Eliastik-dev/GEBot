@@ -3,6 +3,9 @@
  * Skips scenario-specific reranking patches (exhaust supplement, automotive boosts).
  */
 
+/** Bump when retrieval behaviour changes — compare with /health/detail after deploy. */
+export const RETRIEVAL_FEATURES_VERSION = "2026-06-12-cross-catalog-poele-accent";
+
 export type VectorRagLiteMode = "auto" | "true" | "false";
 
 export function resolveVectorRagLite(catalogSize: number): boolean {

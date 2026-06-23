@@ -112,7 +112,7 @@ export const geolocationRateLimiter = rateLimit({
 });
 
 export function applySecurityMiddleware(app: Express): void {
-  if (env.TRUST_PROXY) {
+  if (env.USE_TRUST_PROXY) {
     app.set("trust proxy", 1);
   }
   app.use(helmetMiddleware);

@@ -40,7 +40,7 @@ read_health_commit() {
   local port="$1"
   local json url token commit
   token="$(read_env_var HEALTH_DETAIL_TOKEN)"
-  url="http://127.0.0.1:${port}/health"
+  url="http://127.0.0.1:${port}/health/detail"
   if [[ -n "${token}" ]]; then
     url="${url}?token=${token}"
   fi
@@ -53,8 +53,9 @@ read_health_commit() {
     return 0
   fi
 
-  # Production /health without HEALTH_DETAIL_TOKEN returns only {"ok":true}.
-  if echo "${json}" | grep -qE '"ok"[[:space:]]*:[[:space:]]*true'; then
+  # Production /health returns only {"status":"ok","version":"..."}.
+  # Full deploy verification uses /health/detail?token=...
+  if echo "${json}" | grep -qE '"status"[[:space:]]*:[[:space:]]*"ok"'; then
     commit="$(read_startup_commit_from_pm2)"
     if [[ -n "${commit}" ]]; then
       echo "${commit}"
@@ -361,7 +362,7 @@ if [[ -z "${RUNNING_COMMIT}" ]]; then
   fail "Backend /health unreachable after PM2 start — see logs above."
 fi
 if [[ "${RUNNING_COMMIT}" == "__OK_MINIMAL_HEALTH__" ]]; then
-  warn "Health OK (production minimal payload). Set HEALTH_DETAIL_TOKEN in ${ENV_FILE} to verify commit via /health."
+  warn "Health OK (minimal /health). Set HEALTH_DETAIL_TOKEN in ${ENV_FILE} to verify commit via /health/detail."
   RUNNING_COMMIT="${DEPLOY_COMMIT}"
 elif [[ "${RUNNING_COMMIT}" != "${DEPLOY_COMMIT}" ]]; then
   warn_port_conflict "${BACKEND_PORT}"

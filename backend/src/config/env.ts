@@ -11,15 +11,30 @@ function parseCsv(value: string | undefined): string[] {
   return value.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
 export const env = {
   NODE_ENV: (process.env.NODE_ENV ?? "development") as "development" | "production" | "test",
   /** Comma-separated browser origins allowed to call the API (in addition to WP_URL). */
   CORS_ALLOWED_ORIGINS: parseCsv(process.env.CORS_ALLOWED_ORIGINS),
   /** Max characters accepted in a chat message after sanitization. */
   CHAT_MESSAGE_MAX_LENGTH: Number(process.env.CHAT_MESSAGE_MAX_LENGTH ?? "4000"),
-  /** Trust X-Forwarded-For when behind Nginx/reverse proxy. */
-  TRUST_PROXY: process.env.TRUST_PROXY !== "false",
-  /** Optional bearer for verbose /health diagnostics in production. */
+  /**
+   * Trust X-Forwarded-For / X-Real-IP from the first reverse proxy hop.
+   * Set true only behind a trusted proxy (e.g. Nginx). Default false.
+   * Legacy alias: TRUST_PROXY (used when USE_TRUST_PROXY is unset).
+   */
+  USE_TRUST_PROXY:
+    parseBooleanEnv(process.env.USE_TRUST_PROXY) ??
+    parseBooleanEnv(process.env.TRUST_PROXY) ??
+    false,
+  /** Optional bearer for `/health/detail` in production (`?token=...`). */
   HEALTH_DETAIL_TOKEN: process.env.HEALTH_DETAIL_TOKEN ?? "",
   /** HMAC secret for signed session tokens (required in production). */
   SESSION_TOKEN_SECRET:

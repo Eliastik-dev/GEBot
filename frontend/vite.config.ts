@@ -14,6 +14,10 @@ export default defineConfig(({ mode }) => ({
         target: "http://localhost:8787",
         changeOrigin: true,
       },
+      "/health/detail": {
+        target: "http://localhost:8787",
+        changeOrigin: true,
+      },
     },
   },
   build: {

@@ -129,7 +129,28 @@ WP_APP_PASSWORD=
 # Amazon / reseller links
 AMAZON_STORE_URL=https://www.amazon.fr/s?k=GEB
 WP_RESELLERS_ENDPOINT=/wp-json/wp/v2/resellers
+
+# Security (required for production feedback + health detail)
+SESSION_TOKEN_SECRET=   # openssl rand -hex 32
+HEALTH_DETAIL_TOKEN=    # openssl rand -hex 16 — for deploy verification
+
+# Reverse proxy trust (see section below)
+USE_TRUST_PROXY=true
 ```
+
+### `USE_TRUST_PROXY` — when to enable
+
+Express uses the client IP for geolocation (`X-Forwarded-For` / `X-Real-IP`). Setting `USE_TRUST_PROXY=true` tells Express to trust the **first proxy hop** (`app.set('trust proxy', 1)`).
+
+| Deployment | `USE_TRUST_PROXY` | Why |
+|------------|-------------------|-----|
+| **Behind Nginx** (recommended production setup) | `true` | Nginx sets `X-Real-IP` / `X-Forwarded-For` with the real client address |
+| **Direct exposure** (Node port 8787 open to the internet/LAN without Nginx) | `false` | Prevents clients from spoofing `X-Forwarded-For` to manipulate geolocation |
+
+> **Important:** Never set `USE_TRUST_PROXY=true` unless the app sits behind a **trusted** reverse proxy you control.  
+> Legacy alias: `TRUST_PROXY` (used only when `USE_TRUST_PROXY` is unset).
+
+Default when unset: **`false`** (secure by default).
 
 Secure the file:
 
@@ -164,9 +185,13 @@ The script will:
 pm2 status
 pm2 logs gebot-backend
 
-# Direct health check (bypasses Nginx)
+# Direct liveness probe (no DB, safe for load balancers)
 curl http://127.0.0.1:8787/health
-# Expected: {"ok":true}
+# Expected: {"status":"ok","version":"2026-06-12-cross-catalog-poele-accent"}
+
+# Full deploy diagnostics (requires HEALTH_DETAIL_TOKEN in .env)
+curl "http://127.0.0.1:8787/health/detail?token=YOUR_HEALTH_DETAIL_TOKEN"
+# Expected: commit, catalog probes, retrieval.version, etc.
 ```
 
 ---
@@ -276,13 +301,14 @@ chmod +x scripts/verify-deploy.sh
 ./scripts/verify-deploy.sh
 ```
 
-| Field | Meaning |
-|-------|---------|
-| `commit` | Git revision actually deployed (must match `git log -1 --oneline` on the VM) |
-| `supabase` | `false` → wrong URL/key or network issue; chat may work but sessions/feedback fail |
-| `productKnowledgeFr` | `0` or `null` → catalog empty; responses are slower and less accurate (vector-only fallback) |
-| `catalogReady` | `false` → direct G110 / fiche technique shortcuts are disabled |
-| `retrieval.g110SheetLookup` | Must be `g110-inhibiteur-universel` when catalog is populated |
+| Field | Where | Meaning |
+|-------|-------|---------|
+| `status` / `version` | `/health` | Liveness only — no DB calls |
+| `commit` | `/health/detail` | Git revision deployed (must match `git log -1 --oneline` on the VM) |
+| `supabase` | `/health/detail` | `false` → wrong URL/key or network issue |
+| `productKnowledgeFr` | `/health/detail` | `0` or `null` → catalog empty |
+| `catalogReady` | `/health/detail` | `false` → direct G110 / fiche shortcuts disabled |
+| `retrieval.g110SheetLookup` | `/health/detail` | Must be `g110-inhibiteur-universel` when catalog is populated |
 
 Rebuild the **frontend widget** too when UI changes (thumbs up/down live in `gebot-widget.js`):
 
@@ -304,9 +330,10 @@ sudo systemctl reload nginx   # if Nginx serves the widget
 | `502 Bad Gateway` from Nginx | `pm2 status` — is `gebot-backend` online? Does `PORT` in `.env` match `__BACKEND_PORT__` in Nginx? |
 | Widget loads but chat fails (`403 Origin not allowed`) | CORS: add the page origin to `CORS_ALLOWED_ORIGINS` in `.env` (comma-separated). Test page on `http://gebot.pn2.geb` is allowed automatically when widget and API share the same Nginx host; WordPress embeds need `WP_URL` or explicit origins |
 | Widget loads but chat fails (other) | Browser devtools → Network → `/api/chat` response; check `pm2 logs gebot-backend` |
-| Fixes on GitHub but not on server | You likely ran `git pull` only — run `./deploy_ubuntu.sh` and check `curl /health` commit hash |
-| Deploy fails: `/health` unreachable but PM2 logs show `Backend listening` | Production `/health` returns only `{"ok":true}` unless `HEALTH_DETAIL_TOKEN` is set in `.env`. The bot may still be fine — check `pm2 logs gebot-backend` for `[startup] commit`. Optional: add `HEALTH_DETAIL_TOKEN=<random>` to `.env` for full deploy verification |
-| Deploy fails: expected commit ≠ `/health` commit | Another process owns `PORT`. Common case: **orphan** `node …/GEBot/backend/dist/server.js` (PID visible in `ss` but absent from `pm2 status`). Run `kill <PID>` then `./deploy_ubuntu.sh`. Or another PM2 app — stop it or change `PORT` in `.env` |
+| Fixes on GitHub but not on server | You likely ran `git pull` only — run `./deploy_ubuntu.sh` and check `/health/detail?token=...` commit |
+| Deploy fails: `/health` unreachable but PM2 logs show `Backend listening` | Check `curl http://127.0.0.1:8787/health` — expect `{"status":"ok",...}`. For commit/catalog checks set `HEALTH_DETAIL_TOKEN` and use `/health/detail?token=...` |
+| Deploy fails: expected commit ≠ `/health/detail` commit | Another process owns `PORT`. Common case: **orphan** `node …/GEBot/backend/dist/server.js`. Run `kill <PID>` then `./deploy_ubuntu.sh` |
+| Geolocation shows wrong country | If behind Nginx, set `USE_TRUST_PROXY=true`. If exposed directly, keep `USE_TRUST_PROXY=false` |
 | `gebot-backend` thousands of PM2 restarts | Crash loop — usually `EADDRINUSE` because port 8787 is taken. See row above |
 | `pm2 restart all` used before deploy | Restarts old compiled code without rebuild; use `./deploy_ubuntu.sh` only |
 | Direct `/health` OK but site still wrong | Nginx not reloaded or proxies to another port/app — compare `curl 127.0.0.1:8787/health` vs `curl http://gebot.pn2.geb/health` |
