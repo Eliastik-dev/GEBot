@@ -43,6 +43,11 @@ export const env = {
       : (process.env.SESSION_TOKEN_SECRET ?? "dev-insecure-session-token-secret"),
   /** Lifetime of issued session tokens (default 24h). */
   SESSION_TOKEN_TTL_MS: Number(process.env.SESSION_TOKEN_TTL_MS ?? String(24 * 60 * 60 * 1000)),
+  /**
+   * When false, skip ipapi.co lookups (no client IP sent to third parties).
+   * `/api/geolocation` still responds with countryCode: null.
+   */
+  GEOLOCATION_ENABLED: parseBooleanEnv(process.env.GEOLOCATION_ENABLED) ?? true,
   MISTRAL_API_KEY: required("MISTRAL_API_KEY"),
   MISTRAL_EMBED_BATCH_SIZE: Number(process.env.MISTRAL_EMBED_BATCH_SIZE ?? "32"),
   /** Pause between embedding HTTP calls (ms). Helps stay under Mistral req/min on free tier (~60). */

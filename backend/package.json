@@ -28,7 +28,7 @@
     "@llamaindex/mistral": "^0.1.22",
     "@llamaindex/supabase": "^0.1.23",
     "@supabase/supabase-js": "^2.101.1",
-    "axios": "^1.15.0",
+    "axios": "1.18.1",
     "cheerio": "^1.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.0",

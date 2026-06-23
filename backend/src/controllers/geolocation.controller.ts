@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import { ensureSession } from "../services/database.service.js";
-import { geolocateIp } from "../services/rag.service.js";
+import { geolocateIp } from "../services/geolocation.service.js";
 import { normalizeLocale } from "../utils/locale.js";
 import { isValidUuid } from "../utils/sanitize.js";
 import { sessionAuthFields } from "../utils/session-token.js";

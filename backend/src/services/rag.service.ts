@@ -1,7 +1,7 @@
 import { storageContextFromDefaults, VectorStoreIndex } from "llamaindex";
 import { SupabaseVectorStore } from "@llamaindex/supabase";
 import { env } from "../config/env.js";
-import { GEO_TIMEOUT_MS, RESELLER_CACHE_TTL_MS, RESELLER_DIRECTORY_URL, VECTOR_SEARCH_TIMEOUT_MS } from "../config/constants.js";
+import { RESELLER_CACHE_TTL_MS, RESELLER_DIRECTORY_URL, VECTOR_SEARCH_TIMEOUT_MS } from "../config/constants.js";
 import type { Locale, ProductTheme, Reseller, StoredMessage } from "../types/index.js";
 import { hasDescalingContext, hasHeatingCircuitContext, hasInaccessibleThreadedJointForResinContext, isJointSealingAssemblyWithoutLeak, isPersonalDrinkwareOutOfCatalog, isPurePipeLeakDamageTurn, isSanitaryFixtureSealingContext, isThinRetrievalQuery, userTurnRelevantToLeakRepairThread, hasObviousLeakOrPipeDamageIntent, isThreadedJointOrLiquidSealingTopic } from "../utils/diagnostic-rules.js";
 import { isProfileOnlyMessage, isThemeOnlyMessage } from "../utils/locale.js";
@@ -669,16 +669,5 @@ export async function getCachedResellers(): Promise<Reseller[]> {
         ];
   resellerCache = { value, expiresAt: Date.now() + RESELLER_CACHE_TTL_MS };
   return value;
-}
-
-
-export async function geolocateIp(ip: string | null): Promise<{ countryCode: string | null }> {
-  if (!ip) return { countryCode: null };
-  const url = `https://ipapi.co/${encodeURIComponent(ip)}/json/`;
-  const response = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }), GEO_TIMEOUT_MS, "IP_GEO");
-  if (!response.ok) return { countryCode: null };
-  const payload = (await response.json()) as { country_code?: string };
-  const countryCode = payload.country_code?.toUpperCase() ?? null;
-  return { countryCode };
 }
 

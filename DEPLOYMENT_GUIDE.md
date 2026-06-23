@@ -152,6 +152,17 @@ Express uses the client IP for geolocation (`X-Forwarded-For` / `X-Real-IP`). Se
 
 Default when unset: **`false`** (secure by default).
 
+### IP geolocation & GDPR (`GEOLOCATION_ENABLED`)
+
+When a user accepts the geolocation prompt, the widget calls `GET /api/geolocation`. The backend may resolve the client IP to a country code using **[ipapi.co](https://ipapi.co/)** (`https://ipapi.co/<ip>/json/`). The visitor IP is sent to that third-party service.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `GEOLOCATION_ENABLED=true` | yes | Country lookup via ipapi.co (subject to their terms / DPA) |
+| `GEOLOCATION_ENABLED=false` | — | No external call; API returns `countryCode: null` (NF DTU / France-specific hints rely on explicit user consent in the widget) |
+
+Set `GEOLOCATION_ENABLED=false` if you must avoid transmitting client IPs to third parties. Combine with `USE_TRUST_PROXY=true` only behind Nginx so the IP used is the real client address when geo **is** enabled.
+
 Secure the file:
 
 ```bash
