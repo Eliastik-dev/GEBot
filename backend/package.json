@@ -17,6 +17,12 @@
     "audit-catalog-themes": "tsx src/cli/audit-catalog-themes.ts",
     "realign-catalog-themes": "tsx src/cli/realign-catalog-themes.ts",
     "convert-amazon-links": "tsx src/cli/convert-amazon-links-to-json.ts",
+    "cli:audit-missing-pdfs": "tsx src/cli/audit-missing-pdfs.ts",
+    "cli:audit-guessable-pdfs": "tsx src/cli/audit-guessable-pdfs.ts",
+    "cli:audit-pk-vs-documents": "tsx src/cli/audit-pk-vs-documents.ts",
+    "cli:audit-wp-ft-coverage": "tsx src/cli/audit-wp-ft-coverage.ts",
+    "cli:audit-wp-product-counts": "tsx src/cli/audit-wp-product-counts.ts",
+    "cli:audit-ft-coverage-full": "tsx src/cli/audit-ft-coverage-full.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

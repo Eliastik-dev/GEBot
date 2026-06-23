@@ -16,8 +16,7 @@ import type {
   FeedbackSlugAdjustments,
 } from "../../services/feedback-retrieval.service.js";
 import type { ProductKnowledgeRenderContext } from "../../services/product-router.service.js";
-import type { GoldenExample } from "../../services/golden-examples.service.js";
-import type { NegativeExample } from "../../services/negative-examples.service.js";
+import type { GoldenExample, NegativeExample } from "../../services/feedback-retrieval.service.js";
 import type { JudgeInput } from "../../services/judge.service.js";
 import type { FeedbackProductCorrectionContext } from "../../utils/feedback-correction.js";
 import type {

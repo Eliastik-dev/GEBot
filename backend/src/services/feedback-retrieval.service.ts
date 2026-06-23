@@ -8,8 +8,18 @@ import { env } from "../config/env.js";
 import { supabase } from "../config/supabase.js";
 import type { Locale } from "../types/index.js";
 import { feedbackEmbeddingText } from "../utils/conversation-context.js";
-import type { GoldenExample } from "./golden-examples.service.js";
-import type { NegativeExample } from "./negative-examples.service.js";
+
+export type GoldenExample = {
+  userQuery: string;
+  assistantReply: string;
+};
+
+export type NegativeExample = {
+  userQuery: string;
+  productSlugs: string[];
+  retrievalPath: string | null;
+  recommendedProduct: string | null;
+};
 
 export type FeedbackSlugAdjustments = {
   boostSlugs: string[];
@@ -693,4 +703,24 @@ export function feedbackSlugScoreDelta(
   }
 
   return delta;
+}
+
+/** @deprecated Prefer resolveFeedbackRetrievalContext — kept for direct callers. */
+export async function findSimilarGoldenExamples(
+  intentQuery: string,
+  locale: Locale,
+  limit = 2,
+): Promise<GoldenExample[]> {
+  const ctx = await resolveFeedbackRetrievalContext(intentQuery, locale);
+  return ctx.goldenExamples.slice(0, limit);
+}
+
+/** @deprecated Prefer resolveFeedbackRetrievalContext — kept for direct callers. */
+export async function findSimilarNegativeFeedback(
+  intentQuery: string,
+  locale: Locale,
+  limit = 2,
+): Promise<NegativeExample[]> {
+  const ctx = await resolveFeedbackRetrievalContext(intentQuery, locale);
+  return ctx.negativeExamples.slice(0, limit);
 }
