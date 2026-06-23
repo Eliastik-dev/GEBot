@@ -41,6 +41,17 @@ export const GEO_TIMEOUT_MS = 1500;
 export const RESELLER_DIRECTORY_URL = "https://www.geb.fr/revendeurs";
 export const ANSWER_CACHE_VERSION = "v5_9_cited_product_format";
 
+/** Max retrieval chunks passed to the LLM (catalog + FT/FDS). */
+export const PROMPT_MAX_CONTEXT_NODES = 5;
+/** Total character budget for retrieved document text in the generation prompt. */
+export const PROMPT_MAX_CONTEXT_CHARS = 4000;
+/** Conversation turns included in the system/history prompt. */
+export const PROMPT_MAX_HISTORY_MESSAGES = 5;
+/** Vector similarity search pool size (embedding + Supabase). */
+export const VECTOR_RETRIEVAL_TOP_K = 5;
+/** Max FT/FDS chunks fetched per product slug during retrieval. */
+export const PDF_CHUNKS_PER_SLUG_CAP = 3;
+
 export const COMPLEMENTARY_HINTS: Array<{
   id: string;
   /** When set, extra context checks apply before suggesting this product. */

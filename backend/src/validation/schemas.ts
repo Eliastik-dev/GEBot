@@ -35,10 +35,16 @@ export const chatBodySchema = z.object({
 });
 
 export const feedbackBodySchema = z.object({
-  messageId: z
-    .string()
-    .trim()
-    .regex(/^\d+$/, { message: "messageId must be a numeric id" }),
+  messageId: z.preprocess(
+    (val) => (val == null || val === "" ? val : String(val)),
+    z
+      .string()
+      .trim()
+      .min(1)
+      .refine((v) => /^\d+$/.test(v) || isValidUuid(v), {
+        message: "messageId must be a numeric id or UUID",
+      }),
+  ),
   sessionId: sessionIdSchema,
   sessionToken: z.string().trim().min(1).optional(),
   feedback: z.union([z.literal(1), z.literal(-1), z.literal(0)]),

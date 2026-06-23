@@ -536,9 +536,10 @@ export async function retrievePdfChunksForSlugs(
   options?: {
     materialKeyword?: string | null;
     queryText?: string;
+    maxChunksPerSlug?: number;
   },
 ): Promise<unknown[]> {
-  const topK = env.PDF_CHUNKS_PER_SLUG;
+  const topK = Math.min(options?.maxChunksPerSlug ?? env.PDF_CHUNKS_PER_SLUG, env.PDF_CHUNKS_PER_SLUG);
   const queryText = options?.queryText?.trim() || options?.materialKeyword?.trim() || "compatibilite materiau fluide";
   const uniqueSlugs = [...new Set(slugs.filter(Boolean))].slice(0, env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS);
   const collected: unknown[] = [];
@@ -568,7 +569,7 @@ export async function retrievePdfChunksForSlugs(
           rankPdfChunk(b, options?.materialKeyword, queryText) - rankPdfChunk(a, options?.materialKeyword, queryText),
       );
 
-    collected.push(...ranked);
+    collected.push(...ranked.slice(0, topK));
   }
 
   return collected;

@@ -53,6 +53,29 @@ describe("feedbackBodySchema", () => {
     }
   });
 
+  it("accepts numeric messageId coerced from number", () => {
+    const result = feedbackBodySchema.safeParse({
+      messageId: 42,
+      sessionId: VALID_SESSION,
+      sessionToken,
+      feedback: 1,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.messageId).toBe("42");
+    }
+  });
+
+  it("accepts UUID messageId", () => {
+    const result = feedbackBodySchema.safeParse({
+      messageId: VALID_SESSION,
+      sessionId: VALID_SESSION,
+      sessionToken,
+      feedback: 1,
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("rejects non-numeric messageId", () => {
     const result = feedbackBodySchema.safeParse({
       messageId: "abc",

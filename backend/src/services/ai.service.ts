@@ -2,7 +2,7 @@ import { Settings, type VectorStoreIndex } from "llamaindex";
 import { MistralAI } from "@llamaindex/mistral";
 import type express from "express";
 import { env } from "../config/env.js";
-import { FULL_RESPONSE_BUDGET_MS } from "../config/constants.js";
+import { FULL_RESPONSE_BUDGET_MS, PROMPT_MAX_CONTEXT_NODES } from "../config/constants.js";
 import type { Audience, Locale, ProblemClassification, StoredMessage } from "../types/index.js";
 import type { ExtractedMetadata } from "../modules/retrieval/intent-extractor.js";
 import type { GoldenExample, NegativeExample } from "./feedback-retrieval.service.js";
@@ -293,7 +293,7 @@ ${GEB_ONLY_BRAND_RULE_PROMPT}
 - Tone: expert, empathetic, concise — human first, precise always.
 
 Historique utile:
-${history || "(aucun historique)"}`
+${truncateForPrompt(history, 2000) || "(aucun historique)"}`
     .trim();
 }
 
@@ -363,7 +363,7 @@ export async function classifyProblemTypeWithLlm(query: string, locale: Locale):
 }
 
 
-export function buildPreAnalysisTranscript(history: StoredMessage[], currentMessage: string, maxLines = 14): string {
+export function buildPreAnalysisTranscript(history: StoredMessage[], currentMessage: string, maxLines = 5): string {
   const recent = history.slice(-maxLines);
   const lines = recent.map((row) => `${row.role}: ${row.content}`);
   lines.push(`user: ${currentMessage}`);
@@ -452,7 +452,7 @@ export async function queryWithRetryAndFallback(params: {
     });
     const queryEngine = params.index.asQueryEngine({
       retriever: params.retriever,
-      similarityTopK: env.TOP_K,
+      similarityTopK: PROMPT_MAX_CONTEXT_NODES,
     });
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {

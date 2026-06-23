@@ -198,7 +198,7 @@ export async function postProcessReply(ctx: ChatPipelineBindings): Promise<void>
         handoff: ctx.handoff,
         responseMs: Date.now() - startedAt,
         geoCountry: ctx.effectiveGeoCountry,
-        messageId: ctx.assistantMsgId,
+        messageId: ctx.assistantMsgId != null ? String(ctx.assistantMsgId) : null,
       },
       "done",
     );
