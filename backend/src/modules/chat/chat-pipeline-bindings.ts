@@ -192,16 +192,4 @@ export interface ChatPipelineBindings {
   contextChunksForJudge?: JudgeInput["contextChunks"];
   assistantMsgId?: string | null;
   problemClassification?: ProblemClassification;
-
-  /** Per-phase latency breakdown (ms) for console diagnostics. */
-  pipelineTiming?: {
-    requestStart: number;
-    resolveSessionContextMs?: number;
-    runRetrievalPipelineMs?: number;
-    intentExtractorMs?: number;
-    vectorSearchMs?: number;
-    generateAndStreamReplyMs?: number;
-    ttftMs?: number;
-    postProcessReplyMs?: number;
-  };
 }

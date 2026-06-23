@@ -82,22 +82,21 @@ export async function submitFeedback(
   apiBaseUrl: string,
   sessionId: string,
   sessionToken: string,
-  messageId: string | number,
+  messageId: string,
   feedback: 1 | -1,
 ): Promise<void> {
-  const normalizedMessageId = String(messageId);
   await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/feedback`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-session-id": sessionId,
-      "x-session-token": sessionToken,
+      "X-Session-Id": sessionId,
+      ...(sessionToken ? { "X-Session-Token": sessionToken } : {}),
     },
     body: JSON.stringify({
-      messageId: normalizedMessageId,
+      messageId,
       sessionId,
       feedback,
-      sessionToken,
+      ...(sessionToken ? { sessionToken } : {}),
     }),
   });
 }

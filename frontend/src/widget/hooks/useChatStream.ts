@@ -213,8 +213,8 @@ export function useChatStream({
           if (meta.handoff !== undefined) {
             setHandoff(meta.handoff ?? null);
           }
-          if (meta.messageId != null) {
-            const mid = String(meta.messageId);
+          if (meta.messageId) {
+            const mid = meta.messageId;
             setMsgs((m) => {
               const next = [...m];
               const last = next[next.length - 1];

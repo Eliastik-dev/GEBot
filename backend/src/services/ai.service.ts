@@ -2,7 +2,7 @@ import { Settings, type VectorStoreIndex } from "llamaindex";
 import { MistralAI } from "@llamaindex/mistral";
 import type express from "express";
 import { env } from "../config/env.js";
-import { FULL_RESPONSE_BUDGET_MS, PROMPT_MAX_CONTEXT_NODES } from "../config/constants.js";
+import { FULL_RESPONSE_BUDGET_MS } from "../config/constants.js";
 import type { Audience, Locale, ProblemClassification, StoredMessage } from "../types/index.js";
 import type { ExtractedMetadata } from "../modules/retrieval/intent-extractor.js";
 import type { GoldenExample, NegativeExample } from "./feedback-retrieval.service.js";
@@ -293,7 +293,7 @@ ${GEB_ONLY_BRAND_RULE_PROMPT}
 - Tone: expert, empathetic, concise — human first, precise always.
 
 Historique utile:
-${truncateForPrompt(history, 2000) || "(aucun historique)"}`
+${history || "(aucun historique)"}`
     .trim();
 }
 
@@ -363,7 +363,7 @@ export async function classifyProblemTypeWithLlm(query: string, locale: Locale):
 }
 
 
-export function buildPreAnalysisTranscript(history: StoredMessage[], currentMessage: string, maxLines = 5): string {
+export function buildPreAnalysisTranscript(history: StoredMessage[], currentMessage: string, maxLines = 14): string {
   const recent = history.slice(-maxLines);
   const lines = recent.map((row) => `${row.role}: ${row.content}`);
   lines.push(`user: ${currentMessage}`);
@@ -436,9 +436,6 @@ export async function queryWithRetryAndFallback(params: {
   audience: Audience;
   locale: Locale;
   res: express.Response;
-  profiling?: {
-    onFirstToken?: (ttftMs: number) => void;
-  };
 }): Promise<string> {
   const models = [env.MISTRAL_CHAT_MODEL, ...parseFallbackModels(env.MISTRAL_CHAT_FALLBACK_MODELS)];
   const maxRetries = Math.max(1, env.MISTRAL_CHAT_MAX_RETRIES);
@@ -452,7 +449,7 @@ export async function queryWithRetryAndFallback(params: {
     });
     const queryEngine = params.index.asQueryEngine({
       retriever: params.retriever,
-      similarityTopK: PROMPT_MAX_CONTEXT_NODES,
+      similarityTopK: env.TOP_K,
     });
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -472,22 +469,16 @@ export async function queryWithRetryAndFallback(params: {
             "status",
           );
         }
-        const mistralPromptSentAt = performance.now();
         const stream = await withTimeout(
           queryEngine.query({ query: params.fullQuery, stream: true }),
           FULL_RESPONSE_BUDGET_MS,
           "MISTRAL_QUERY",
         );
         let answer = "";
-        let firstTokenLogged = false;
         sseWriteWithSession(params.res, params.sessionId, { status: "generating", audience: params.audience, locale: params.locale }, "status");
         for await (const chunk of stream) {
           const delta = (chunk as { delta?: string }).delta ?? "";
           if (!delta) continue;
-          if (!firstTokenLogged) {
-            firstTokenLogged = true;
-            params.profiling?.onFirstToken?.(Math.round(performance.now() - mistralPromptSentAt));
-          }
           answer += delta;
           sseWriteWithSession(params.res, params.sessionId, { delta, audience: params.audience }, "chunk");
         }

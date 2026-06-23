@@ -1,4 +1,4 @@
-import type { Request, Response } from "express";
+﻿import type { Request, Response } from "express";
 import { buildEnrichedSearchQuery, dynamicRerank, hasExhaustProductInNodes, isAutomotiveExhaustContext } from "../retrieval/dynamic-reranker.js";
 import { runDiagnosticAnalysis, type DiagnosticAnalysis } from "../retrieval/intent-extractor.js";
 import { ANSWER_CACHE_VERSION, answerCache, NEXT_QUESTION_AFTER_THEME, ONBOARDING_QUESTION_BY_LOCALE, THEME_QUESTION_BY_LOCALE, TTFT_TARGET_MS, VALID_THEMES, VECTOR_SEARCH_TIMEOUT_MS } from "../../config/constants.js";
@@ -198,7 +198,7 @@ export async function postProcessReply(ctx: ChatPipelineBindings): Promise<void>
         handoff: ctx.handoff,
         responseMs: Date.now() - startedAt,
         geoCountry: ctx.effectiveGeoCountry,
-        messageId: ctx.assistantMsgId != null ? String(ctx.assistantMsgId) : null,
+        messageId: ctx.assistantMsgId,
       },
       "done",
     );

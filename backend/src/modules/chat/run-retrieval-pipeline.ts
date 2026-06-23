@@ -1,7 +1,7 @@
-import type { Request, Response } from "express";
+﻿import type { Request, Response } from "express";
 import { buildEnrichedSearchQuery, dynamicRerank, hasExhaustProductInNodes, isAutomotiveExhaustContext } from "../retrieval/dynamic-reranker.js";
 import { runDiagnosticAnalysis, type DiagnosticAnalysis } from "../retrieval/intent-extractor.js";
-import { ANSWER_CACHE_VERSION, answerCache, NEXT_QUESTION_AFTER_THEME, ONBOARDING_QUESTION_BY_LOCALE, PDF_CHUNKS_PER_SLUG_CAP, PROMPT_MAX_CONTEXT_NODES, PROMPT_MAX_HISTORY_MESSAGES, THEME_QUESTION_BY_LOCALE, TTFT_TARGET_MS, VALID_THEMES, VECTOR_RETRIEVAL_TOP_K, VECTOR_SEARCH_TIMEOUT_MS } from "../../config/constants.js";
+import { ANSWER_CACHE_VERSION, answerCache, NEXT_QUESTION_AFTER_THEME, ONBOARDING_QUESTION_BY_LOCALE, THEME_QUESTION_BY_LOCALE, TTFT_TARGET_MS, VALID_THEMES, VECTOR_SEARCH_TIMEOUT_MS } from "../../config/constants.js";
 import { env } from "../../config/env.js";
 import { resolveVectorRagLite } from "../../config/retrieval.js";
 import {
@@ -95,7 +95,7 @@ import type { VectorStoreIndex } from "llamaindex";
 import type { z } from "zod";
 import type { ChatPipelineBindings } from "./chat-pipeline-bindings.js";
 import { assertAfterSessionContext } from "./chat-pipeline-assertions.js";
-import { buildAnswerCacheKey, compactRetrievalNodesForPrompt, filterRetrievalNodesByFeedbackPenalties } from "./chat-helpers.js";
+import { buildAnswerCacheKey, filterRetrievalNodesByFeedbackPenalties } from "./chat-helpers.js";
 
 export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<void> {
   if (ctx.completed) return;
@@ -103,22 +103,14 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
   const { req, res, deps, startedAt, body, message, locale, profileFromMetadata, sessionId, geoConsentFromBody, geoCountryFromBody } = ctx;
 
     // ÔöÇÔöÇ ML-based Intent & Metadata Extraction (replaces legacy regex gates) ÔöÇÔöÇ
-    ctx.preAnalysisTranscript = buildPreAnalysisTranscript(
-      ctx.historyMessages.slice(-PROMPT_MAX_HISTORY_MESSAGES),
-      message,
-      PROMPT_MAX_HISTORY_MESSAGES,
-    );
+    ctx.preAnalysisTranscript = buildPreAnalysisTranscript(ctx.historyMessages, message);
     ctx.userCitationScanText = buildUserCitationScanText(ctx.historyMessages, message);
     ctx.citationScanText = `${ctx.preAnalysisTranscript}\n${message}`;
-    const intentExtractorStart = performance.now();
     const diagnosticResult: DiagnosticAnalysis = await runDiagnosticAnalysis(
       ctx.preAnalysisTranscript,
       locale,
       message,
     );
-    if (ctx.pipelineTiming) {
-      ctx.pipelineTiming.intentExtractorMs = Math.round(performance.now() - intentExtractorStart);
-    }
     ctx.diagnosticResult = diagnosticResult;
     ctx.extractedMeta = { ...diagnosticResult.metadata };
     if (ctx.jointPasteContext) {
@@ -517,7 +509,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
 
     ctx.resellerPromise = locale === "pl" ? Promise.resolve<Reseller[]>([]) : getCachedResellers().catch(() => []);
 
-    ctx.history = toHistoryPrompt(ctx.historyMessages.slice(-PROMPT_MAX_HISTORY_MESSAGES));
+    ctx.history = toHistoryPrompt(ctx.historyMessages);
     ctx.ongoingConversation = hasOngoingConversation(ctx.historyMessages);
     ctx.priorRecommendedProduct = ctx.sessionDiscussedProduct;
     ctx.productFollowUp = isProductFollowUpQuestion(message, ctx.historyMessages);
@@ -775,8 +767,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
     }
 
     if (ctx.retrievalPath === "vector_rag") {
-      const vectorSearchStart = performance.now();
-      const retrievalPoolK = VECTOR_RETRIEVAL_TOP_K;
+      const retrievalPoolK = Math.max(env.TOP_K, Math.round(env.TOP_K * env.RETRIEVAL_POOL_MULTIPLIER));
       const retriever = deps.index.asRetriever({
         similarityTopK: retrievalPoolK,
         filters: ctx.preFilters,
@@ -843,7 +834,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       ) {
         console.log("[/api/chat] supplementing exhaust-specific retrieval", { sessionId });
         const supplementRetriever = deps.index.asRetriever({
-          similarityTopK: VECTOR_RETRIEVAL_TOP_K,
+          similarityTopK: 8,
           filters: {
             filters: [...ctx.baseFilters, ...ctx.policyFilters],
             condition: "and" as const,
@@ -923,11 +914,8 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
         });
       }
       ctx.resolvedNodes = prioritizeTechnicalSheets(ctx.resolvedNodes);
-      ctx.resolvedNodes = capContextNodes(ctx.resolvedNodes, PROMPT_MAX_CONTEXT_NODES);
+      ctx.resolvedNodes = capContextNodes(ctx.resolvedNodes, env.DIAGNOSTIC_MAX_CONTEXT_NODES);
       ctx.retrievalCount = ctx.resolvedNodes.length;
-      if (ctx.pipelineTiming) {
-        ctx.pipelineTiming.vectorSearchMs = Math.round(performance.now() - vectorSearchStart);
-      }
     } else {
       ctx.retrievalCount = ctx.resolvedNodes.length;
     }
@@ -940,12 +928,11 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
         const pdfNodes = await retrievePdfChunksForSlugs(deps.index, ctx.pdfSupplementSlugs, ctx.pkLocale, {
           materialKeyword: ctx.extractedMeta.material,
           queryText: ctx.factualProductMode ? ctx.citationScanText : ctx.searchQuery,
-          maxChunksPerSlug: PDF_CHUNKS_PER_SLUG_CAP,
         });
         if (pdfNodes.length > 0) {
           ctx.resolvedNodes = mergeRetrievalNodes(ctx.resolvedNodes, pdfNodes);
           ctx.resolvedNodes = prioritizeTechnicalSheets(ctx.resolvedNodes);
-          ctx.resolvedNodes = capContextNodes(ctx.resolvedNodes, PROMPT_MAX_CONTEXT_NODES);
+          ctx.resolvedNodes = capContextNodes(ctx.resolvedNodes, env.DIAGNOSTIC_MAX_CONTEXT_NODES);
           ctx.retrievalCount = ctx.resolvedNodes.length;
           console.log("[/api/chat] catalog_pdf_supplement", {
             sessionId,
@@ -961,7 +948,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
 
     if (ctx.informationalRetrievalQuestion || ctx.extractedMeta.intent === "general_technical") {
       ctx.faqContextNodes = await retrieveFaqKnowledgeChunks(deps.index, ctx.queryForRetrieval, locale, {
-        topK: VECTOR_RETRIEVAL_TOP_K,
+        topK: 6,
       }).catch(() => []);
       if (ctx.faqContextNodes.length > 0) {
         console.log("[/api/chat] faq_context_prefetch", {
@@ -1005,7 +992,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
     }
 
     ctx.resolvedNodes = prioritizeTechnicalSheets(ctx.resolvedNodes);
-    ctx.resolvedNodes = capContextNodes(ctx.resolvedNodes, PROMPT_MAX_CONTEXT_NODES);
+    ctx.resolvedNodes = capContextNodes(ctx.resolvedNodes, env.DIAGNOSTIC_MAX_CONTEXT_NODES);
     ctx.retrievalCount = ctx.resolvedNodes.length;
 
     console.log(`Context found: [${ctx.retrievalCount}]`, {
@@ -1079,17 +1066,11 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
     }
 
     ctx.sourceUrls = extractSourceUrlsFromNodes(ctx.resolvedNodes);
-    ctx.conversationTranscript = buildPreAnalysisTranscript(
-      ctx.historyMessages.slice(-PROMPT_MAX_HISTORY_MESSAGES),
-      message,
-      PROMPT_MAX_HISTORY_MESSAGES,
-    );
+    ctx.conversationTranscript = buildPreAnalysisTranscript(ctx.historyMessages, message);
     ctx.goldenExamples = ctx.feedbackCtx.goldenExamples;
     ctx.negativeExamples = ctx.feedbackCtx.negativeExamples;
-    ctx.resolvedNodes = compactRetrievalNodesForPrompt(ctx.resolvedNodes);
-    ctx.retrievalCount = ctx.resolvedNodes.length;
     ctx.retrieverForAnswer = deps.index.asRetriever({
-      similarityTopK: VECTOR_RETRIEVAL_TOP_K,
+      similarityTopK: env.TOP_K,
       filters: ctx.preFilters,
     });
     ctx.retrieverForAnswer.retrieve = async () => ctx.resolvedNodes as Awaited<ReturnType<typeof ctx.retrieverForAnswer.retrieve>>;
