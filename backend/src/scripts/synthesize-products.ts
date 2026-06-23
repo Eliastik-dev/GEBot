@@ -32,7 +32,7 @@ import {
   getProductKnowledgeBySlug,
   listProductKnowledgeSlugs,
   upsertProductKnowledge,
-} from "../services/product-knowledge.service.js";
+} from "../modules/retrieval/product-knowledge/index.js";
 import {
   buildRulesBasedFactsForRow,
   RULES_EXTRACTION_VERSION,

@@ -3,7 +3,7 @@ import { configureLlm } from "./config/llm.js";
 import { getBuildInfo } from "./config/build-info.js";
 import { env } from "./config/env.js";
 import { buildQueryEngine } from "./services/rag.service.js";
-import { countProductKnowledge } from "./services/product-knowledge.service.js";
+import { countProductKnowledge } from "./modules/retrieval/product-knowledge/index.js";
 import { registerRoutes, RETRIEVAL_FEATURES_VERSION } from "./routes/index.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { applySecurityMiddleware } from "./middleware/security.js";

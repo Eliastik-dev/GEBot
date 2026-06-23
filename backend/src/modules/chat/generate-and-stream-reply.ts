@@ -41,7 +41,7 @@ import {
   lookupCitedCatalogProductForRecommendation,
   lookupExplicitCatalogProductForSheet,
   searchProductKnowledge,
-} from "../../services/product-knowledge.service.js";
+} from "../retrieval/product-knowledge/index.js";
 import { deliverDirectTechnicalSheetTurn } from "../../services/direct-sheet.service.js";
 import {
   buildRetrieverNodesFromProductKnowledge,

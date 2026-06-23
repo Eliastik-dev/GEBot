@@ -8,7 +8,7 @@ import {
   getProductKnowledgeBySlug,
   lookupCitedCatalogProductForRecommendation,
   lookupExplicitCatalogProductForSheet,
-} from "../services/product-knowledge.service.js";
+} from "../modules/retrieval/product-knowledge/index.js";
 import { productKnowledgeLocale } from "../services/product-router.service.js";
 import { isProduction } from "../utils/http.js";
 

@@ -22,7 +22,7 @@ import {
   categoryToUseCaseTags,
   parseJointServiceFluid,
 } from "../utils/joint-paste.js";
-import { searchProductKnowledge, filterProductKnowledgeByQueryContext } from "./product-knowledge.service.js";
+import { searchProductKnowledge, filterProductKnowledgeByQueryContext } from "../modules/retrieval/product-knowledge/index.js";
 import type { FeedbackSlugAdjustments } from "./feedback-retrieval.service.js";
 import {
   buildCatalogMismatchHints,

@@ -7,7 +7,7 @@
 
 import { CITATION_REGRESSION_CASES, RETRIEVAL_REGRESSION_CASES, type RetrievalRegressionCase } from "../config/retrieval-regression-cases.js";
 import type { ExtractedMetadata } from "../modules/retrieval/intent-extractor.js";
-import { countProductKnowledge, lookupCatalogProductsByCitation } from "../services/product-knowledge.service.js";
+import { countProductKnowledge, lookupCatalogProductsByCitation } from "../modules/retrieval/product-knowledge/index.js";
 import { routeProductKnowledge } from "../services/product-router.service.js";
 
 function parseArgs(argv: string[]): { caseId?: string; citationOnly?: boolean } {

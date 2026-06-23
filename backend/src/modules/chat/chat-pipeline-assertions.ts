@@ -10,7 +10,7 @@ import type {
   StoredMessage,
 } from "../../types/index.js";
 import type { ProductKnowledgeRow } from "../../types/product-knowledge.js";
-import type { CatalogCitationResult } from "../../services/product-knowledge.service.js";
+import type { CatalogCitationResult } from "../retrieval/product-knowledge/index.js";
 import type {
   FeedbackRetrievalContext,
   FeedbackSlugAdjustments,
