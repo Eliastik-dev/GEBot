@@ -3,7 +3,7 @@
  */
 import axios from "axios";
 import { readScrapeOutput } from "../services/product-catalog.service.js";
-import { supabase } from "../supabase.js";
+import { supabase } from "../config/supabase.js";
 
 function normalizeUrl(url: string): string {
   try {

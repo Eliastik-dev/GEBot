@@ -3,7 +3,7 @@
  */
 import axios from "axios";
 import { readScrapeOutput } from "../services/product-catalog.service.js";
-import { supabase } from "../supabase.js";
+import { supabase } from "../config/supabase.js";
 
 const ENDPOINTS = {
   fr: "https://www.geb.fr/wp-json/wp/v2/product",

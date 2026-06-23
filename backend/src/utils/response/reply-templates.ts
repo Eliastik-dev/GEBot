@@ -1,35 +1,12 @@
-import { COMPLEMENTARY_HINTS } from "../config/constants.js";
-import type { Audience, HandoffPayload, Locale, ProductTheme, Reseller } from "../types/index.js";
-import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
-import { formatUserFacingMismatchNote, normalizeStoredProductTheme } from "../services/product-theme.service.js";
-import { removeAmazonSections, hasValidRecommendedProduct } from "./amazon.js";
-import { detectTheme } from "./locale.js";
-import { isBuildingSurfaceSealingContext } from "./diagnostic-rules.js";
-import { asksMetalThreadPasteJoint } from "./joint-paste.js";
-import { decodeHtmlEntities, normalizeText } from "./text.js";
-
-export function buildHandoff(locale: Locale, audience: Audience | null): HandoffPayload {
-  if (!audience) return null;
-  const isProfessional = audience === "professional";
-  if (locale === "en") {
-    return isProfessional
-      ? { label: "Contact our Lab", phone: "03 44 88 38 56" }
-      : { label: "Contact Consumer Service", phone: "01 48 17 89 82" };
-  }
-  if (locale === "nl") {
-    return isProfessional
-      ? { label: "Contacteer ons Lab", phone: "03 44 88 38 56" }
-      : { label: "Contacteer Consumentendienst", phone: "01 48 17 89 82" };
-  }
-  if (locale === "pl") {
-    return isProfessional
-      ? { label: "Skontaktuj sie z naszym Laboratorium", phone: "03 44 88 38 56" }
-      : { label: "Skontaktuj sie z Dzialem Konsumenta", phone: "01 48 17 89 82" };
-  }
-  return isProfessional
-    ? { label: "Contactez notre Laboratoire", phone: "03 44 88 38 56" }
-    : { label: "Contactez le Service Consommateurs", phone: "01 48 17 89 82" };
-}
+import { COMPLEMENTARY_HINTS } from "../../config/constants.js";
+import type { Audience, HandoffPayload, Locale, ProductTheme, Reseller } from "../../types/index.js";
+import type { ProductKnowledgeRow } from "../../types/product-knowledge.js";
+import { formatUserFacingMismatchNote, normalizeStoredProductTheme } from "../../services/product-theme.service.js";
+import { removeAmazonSections, hasValidRecommendedProduct } from "../amazon.js";
+import { detectTheme } from "../locale.js";
+import { isBuildingSurfaceSealingContext } from "../diagnostic-rules.js";
+import { asksMetalThreadPasteJoint } from "../joint-paste.js";
+import { decodeHtmlEntities, normalizeText } from "../text.js";
 
 
 function matchesComplementaryHint(text: string, item: (typeof COMPLEMENTARY_HINTS)[number]): boolean {
@@ -51,7 +28,6 @@ function matchesComplementaryHint(text: string, item: (typeof COMPLEMENTARY_HINT
 
   return true;
 }
-
 export function buildComplementarySuggestion(locale: Locale, audience: Audience, message: string): string {
   const match = COMPLEMENTARY_HINTS.find((item) => matchesComplementaryHint(message, item));
   if (!match) return "";
@@ -177,31 +153,6 @@ export function removeComplementaryQuestionBlocks(answer: string): string {
   }
   return sanitized.replace(/\n{3,}/g, "\n\n").trim();
 }
-
-
-export function buildPurchaseAvailabilityIntro(locale: Locale, productName: string): string {
-  const name = decodeHtmlEntities(productName).trim();
-  if (locale === "en") return `You can buy **${name}** using the links below.`;
-  if (locale === "nl") return `U kunt **${name}** kopen via de onderstaande links.`;
-  if (locale === "pl") return `Mozesz kupic **${name}** za pomoca ponizszych linkow.`;
-  return `Pour acheter **${name}**, utilisez les liens ci-dessous.`;
-}
-
-export function hasStoreSection(answer: string): boolean {
-  const normalized = normalizeText(answer);
-  return (
-    normalized.includes("trouver un magasin") ||
-    normalized.includes("trouver un revendeur") ||
-    normalized.includes("find a store") ||
-    normalized.includes("find a reseller") ||
-    normalized.includes("revendeurs geb") ||
-    normalized.includes("annuaire officiel des revendeurs") ||
-    normalized.includes("ou acheter") ||
-    normalized.includes("disponibilite")
-  );
-}
-
-
 export function sanitizeDocumentationLinks(answer: string): string {
   let out = answer.replace(/\[([^\]]*fiche technique[^\]]*)\]\(([^)]+)\)/gi, (_match, _label, url) => {
     const normalizedUrl = String(url).toLowerCase();
@@ -281,21 +232,6 @@ export function hasPipeTopic(message: string): boolean {
   const normalized = normalizeText(message);
   return /\b(tuyau|tube|canalisation|pipe|pvc|raccord)\b/.test(normalized);
 }
-
-
-export function isResellerIntent(message: string): boolean {
-  const normalized = normalizeText(message);
-  return (
-    normalized.includes("revendeur") ||
-    normalized.includes("revendeurs") ||
-    normalized.includes("store") ||
-    normalized.includes("dealer") ||
-    normalized.includes("magasin") ||
-    normalized.includes("winkel") ||
-    normalized.includes("sklep")
-  );
-}
-
 type DirectProductReplyContext = {
   sessionAudience?: Audience | null;
   sessionTheme?: ProductTheme | null;
@@ -711,33 +647,3 @@ export function buildMoreDetailsForProductRequest(
   }
   return "### 💡 Pour identifier un produit GEB adapté\nMerci de préciser encore :\n- **Support** et emplacement exact du problème\n- **Fluide ou environnement** en contact (le cas échéant)\n- **Contexte** (intérieur/extérieur, sous pression ou non)\n- Une **photo** ou description courte si possible";
 }
-
-export function buildResellerSection(locale: Locale, resellers: Reseller[]): string {
-  if (resellers.length === 0) return "";
-  const headingByLocale: Record<Locale, string> = {
-    fr: "### 🏬 Trouver un magasin",
-    en: "### 🏬 Find a Store",
-    nl: "### 🏬 Vind een winkel",
-    pl: "### 🏬 Znajdz sklep",
-  };
-  const lines = resellers.slice(0, 4).map((reseller) => {
-    const details = [reseller.city, reseller.country].filter(Boolean).join(", ");
-    const label = reseller.url ? `[${reseller.name}](${reseller.url})` : reseller.name;
-    return `- ${label}${details ? ` - ${details}` : ""}`;
-  });
-  return `${headingByLocale[locale]}\n${lines.join("\n")}`;
-}
-
-
-export function buildEscalationSection(locale: Locale, audience: Audience | null): string {
-  const handoff = buildHandoff(locale, audience);
-  if (!handoff) return "";
-  return locale === "en"
-    ? `### ☎️ Need expert help?\n- [${handoff.label}](tel:${handoff.phone.replace(/\s+/g, "")})`
-    : locale === "nl"
-      ? `### ☎️ Extra hulp nodig?\n- [${handoff.label}](tel:${handoff.phone.replace(/\s+/g, "")})`
-      : locale === "pl"
-        ? `### ☎️ Potrzebujesz wsparcia eksperta?\n- [${handoff.label}](tel:${handoff.phone.replace(/\s+/g, "")})`
-        : `### ☎️ Besoin d'aide experte ?\n- [${handoff.label}](tel:${handoff.phone.replace(/\s+/g, "")})`;
-}
-

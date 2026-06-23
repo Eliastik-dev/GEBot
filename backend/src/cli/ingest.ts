@@ -11,9 +11,9 @@ import {
   storageContextFromDefaults,
 } from "llamaindex";
 import { SupabaseVectorStore } from "@llamaindex/supabase";
-import { env } from "../env.js";
+import { env } from "../config/env.js";
 import { MistralBatchedEmbedding } from "../mistral-batched-embedding.js";
-import { supabase } from "../supabase.js";
+import { supabase } from "../config/supabase.js";
 import type { ScrapedProductRow } from "../services/product-theme.service.js";
 import { resolveProductTheme } from "../services/wp-catalog-theme.service.js";
 import {

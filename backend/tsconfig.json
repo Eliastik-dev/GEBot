@@ -42,5 +42,5 @@
     "skipLibCheck": true,
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/scripts/convert-amazon-links-to-json.ts", "node_modules", "dist"]
+  "exclude": ["src/**/*.test.ts", "src/cli/convert-amazon-links-to-json.ts", "node_modules", "dist"]
 }

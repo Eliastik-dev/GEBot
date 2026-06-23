@@ -1,9 +1,9 @@
 /**
  * Compare product_knowledge vs documents coverage (FR T_FR technical sheets).
- * Usage: npx tsx src/scripts/audit-pk-vs-documents.ts
+ * Usage: npx tsx src/cli/audit-pk-vs-documents.ts
  */
 import { readScrapeOutput } from "../services/product-catalog.service.js";
-import { supabase } from "../supabase.js";
+import { supabase } from "../config/supabase.js";
 
 async function main(): Promise<void> {
   const [{ count: pkTotal }, { count: docChunks }, { data: pkRows, error: pkErr }] = await Promise.all([

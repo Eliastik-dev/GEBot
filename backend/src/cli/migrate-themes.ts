@@ -1,10 +1,10 @@
 /**
  * Migration script: re-tag vector chunks with theme from metadata + PDF heuristics / WP gamme.
- * Usage: npx tsx src/scripts/migrate-themes.ts
+ * Usage: npx tsx src/cli/migrate-themes.ts
  */
 
-import { env } from "../env.js";
-import { supabase } from "../supabase.js";
+import { env } from "../config/env.js";
+import { supabase } from "../config/supabase.js";
 import { resolveProductTheme } from "../services/wp-catalog-theme.service.js";
 
 async function run(): Promise<void> {

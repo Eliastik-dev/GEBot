@@ -1,4 +1,5 @@
-import { AMAZON_LINKS_BY_LOCALE, RESELLER_DIRECTORY_URL } from "../config/constants.js";
+import { RESELLER_DIRECTORY_URL } from "../config/constants.js";
+import { getAmazonLinksByLocale } from "../config/amazon-links-store.js";
 import { env } from "../config/env.js";
 import type { Locale, RecommendationDetails } from "../types/index.js";
 import { normalizeKey, normalizeText, decodeHtmlEntities } from "./text.js";
@@ -33,7 +34,7 @@ function findAmazonUrlByKeyPrefix(locale: Locale, keyPrefix: string): string | n
   if (!normalizedPrefix) return null;
   const searchLocales: Array<"fr" | "nl"> = locale === "nl" ? ["nl", "fr"] : ["fr", "nl"];
   for (const localKey of searchLocales) {
-    const matches = Object.entries(AMAZON_LINKS_BY_LOCALE[localKey]).filter(
+    const matches = Object.entries(getAmazonLinksByLocale()[localKey]).filter(
       ([key]) => !key.startsWith("ref_geb:") && key.startsWith(normalizedPrefix),
     );
     if (matches.length === 0) continue;
@@ -110,7 +111,7 @@ export function findBestAmazonLinkByName(locale: Locale, productName: string): s
 
   let best: { url: string; score: number } | null = null;
   for (const localKey of searchLocales) {
-    const entries = Object.entries(AMAZON_LINKS_BY_LOCALE[localKey]);
+    const entries = Object.entries(getAmazonLinksByLocale()[localKey]);
     for (const [key, url] of entries) {
       if (key.startsWith("ref_geb:")) continue;
       const candidateTokens = tokenizeForMatch(key);
@@ -160,7 +161,7 @@ export function findBestAmazonLinkBySlug(locale: Locale, slug: string): string |
 
   let best: { url: string; score: number } | null = null;
   for (const localKey of searchLocales) {
-    const entries = Object.entries(AMAZON_LINKS_BY_LOCALE[localKey]);
+    const entries = Object.entries(getAmazonLinksByLocale()[localKey]);
     for (const [key, url] of entries) {
       if (key.startsWith("ref_geb:")) continue;
       const candidateTokens = tokenizeForMatch(key);
@@ -375,7 +376,7 @@ export function resolveAmazonRecommendation(
   const localesToTry: Array<"fr" | "nl"> = locale === "nl" ? ["nl", "fr"] : ["fr", "nl"];
   if (reference) {
     for (const localeKey of localesToTry) {
-      const url = AMAZON_LINKS_BY_LOCALE[localeKey][`ref_geb:${reference}`];
+      const url = getAmazonLinksByLocale()[localeKey][`ref_geb:${reference}`];
       if (url) return { productName: cleanedName, amazonUrl: url };
     }
   }
@@ -385,7 +386,7 @@ export function resolveAmazonRecommendation(
     return { productName: cleanedName, amazonUrl: amazonProductMap[normalizedName] };
   }
   for (const localeKey of localesToTry) {
-    const url = AMAZON_LINKS_BY_LOCALE[localeKey][normalizedName];
+    const url = getAmazonLinksByLocale()[localeKey][normalizedName];
     if (url) return { productName: cleanedName, amazonUrl: url };
   }
   for (const [mappedName, url] of Object.entries(amazonProductMap)) {

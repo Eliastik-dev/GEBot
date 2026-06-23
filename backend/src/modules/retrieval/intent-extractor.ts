@@ -6,7 +6,7 @@
  * structured JSON. A lightweight regex fallback is kept only for critical safety keywords.
  */
 
-import { env } from "../../env.js";
+import { env } from "../../config/env.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

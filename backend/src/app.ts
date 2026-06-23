@@ -1,4 +1,5 @@
 import express from "express";
+import { initAmazonLinks } from "./config/amazon-links-store.js";
 import { configureLlm } from "./config/llm.js";
 import { getBuildInfo } from "./config/build-info.js";
 import { env } from "./config/env.js";
@@ -10,6 +11,7 @@ import { applySecurityMiddleware } from "./middleware/security.js";
 
 export async function createApp(): Promise<express.Express> {
   configureLlm();
+  initAmazonLinks();
   const { index, vectorStore } = await buildQueryEngine();
 
   const app = express();

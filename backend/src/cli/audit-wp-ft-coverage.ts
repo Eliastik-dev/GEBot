@@ -1,10 +1,10 @@
 /**
  * Compare WordPress technical PDFs vs scrape / documents / product_knowledge.
- * Usage: npx tsx src/scripts/audit-wp-ft-coverage.ts
+ * Usage: npx tsx src/cli/audit-wp-ft-coverage.ts
  */
 import axios from "axios";
 import { readScrapeOutput } from "../services/product-catalog.service.js";
-import { supabase } from "../supabase.js";
+import { supabase } from "../config/supabase.js";
 
 type WpMedia = {
   id: number;

@@ -5,7 +5,7 @@
 import type { StoredMessage } from "../types/index.js";
 import { isProfileOnlyMessage, isThemeOnlyMessage, isThemeUncertaintyMessage } from "./locale.js";
 import { mentionsLikelyProductPhrase } from "./product-mention.js";
-import { isYesNoAnswer } from "./response.js";
+import { isYesNoAnswer } from "./response/index.js";
 import { normalizeText } from "./text.js";
 
 export type StoredMessageWithFeedback = StoredMessage & {

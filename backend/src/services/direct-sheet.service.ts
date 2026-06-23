@@ -18,7 +18,7 @@ import {
   removeComplementaryQuestionBlocks,
   sanitizeDocumentationLinks,
   stripLeadingConversationGreeting,
-} from "../utils/response.js";
+} from "../utils/response/index.js";
 import { sseWriteWithSession } from "../utils/sse.js";
 import { classifyProblemTypeWithLlm } from "./ai.service.js";
 import { logProductAnalytics, logQuery, saveMessage } from "./database.service.js";
