@@ -19,6 +19,87 @@ import {
 
 const CITED_PRODUCT_MATCH_MIN = 35;
 
+/** Generic plumbing vocabulary — must NOT drive fuzzy catalogue ilike lookups. */
+const GENERIC_CATALOG_CITATION_STOP_TERMS = new Set([
+  "mastic",
+  "mastics",
+  "eau",
+  "eaux",
+  "joint",
+  "joints",
+  "baignoire",
+  "baignoires",
+  "colle",
+  "colles",
+  "sanitaire",
+  "sanitaires",
+  "silicone",
+  "silicones",
+  "lavabo",
+  "evier",
+  "douche",
+  "bonde",
+  "bondes",
+  "fuite",
+  "fuites",
+  "canalisation",
+  "canalisations",
+  "tuyau",
+  "tuyaux",
+  "plomberie",
+  "wc",
+  "toilette",
+  "toilettes",
+  "carrelage",
+  "etancheite",
+  "etanche",
+  "reparation",
+  "reparer",
+  "produit",
+  "produits",
+]);
+
+/** Brand names and catalogue families that justify a citation lookup. */
+const CATALOG_BRAND_OR_FAMILY_RE =
+  /\b(inhibiteur|desembou|desembouant|deboucheur|debouch|detartrant|detartrans|colmateur|colmatant|gebsoplast|collex|ms[\s-]?zinc|toiturol|silicone|chrono|gebetanche|filasse|ptfe|collafeu|propfeu|acrybat|geborizon|startex|ontstopper|udrazniacz|lekdichter|g\d+)\b/i;
+
+/**
+ * Strip generic plumbing terms from catalogue search terms so "mastic" + "eau" do not
+ * resolve to unrelated SKUs (e.g. MASTIC POUR BONDE on a bathtub question).
+ */
+export function filterCatalogCitationSearchTerms(terms: string[]): string[] {
+  return terms.filter((term) => {
+    const norm = normalizeText(term);
+    if (!norm || norm.length < 2) return false;
+
+    for (const code of extractCatalogProductCodes(norm)) {
+      if (code === norm || norm.includes(code)) return true;
+    }
+    if (/\bms-zinc\b/.test(norm) || norm === "detartrans") return true;
+    if (CATALOG_BRAND_OR_FAMILY_RE.test(norm)) return true;
+
+    const tokens = norm.split(/[\s-]+/).filter(Boolean);
+    if (tokens.length === 0) return false;
+    if (tokens.length === 1 && GENERIC_CATALOG_CITATION_STOP_TERMS.has(tokens[0]!)) return false;
+
+    const nonGeneric = tokens.filter((t) => !GENERIC_CATALOG_CITATION_STOP_TERMS.has(t));
+    return nonGeneric.length > 0;
+  });
+}
+
+function isHighConfidenceCatalogCitation(input: {
+  explicitPatternHit: boolean;
+  codeHit: boolean;
+  product: ProductKnowledgeRow;
+  texts: string[];
+}): boolean {
+  if (input.explicitPatternHit || input.codeHit) return true;
+  if (productHasNamePriority(input.product, input.texts)) return true;
+  const combined = input.texts.join(" ");
+  if (CATALOG_BRAND_OR_FAMILY_RE.test(normalizeText(combined))) return true;
+  return false;
+}
+
 function adjustCitationContextScore(
   product: ProductKnowledgeRow,
   text: string,
@@ -74,11 +155,11 @@ export async function detectCatalogProductCitations(input: {
   minScore?: number;
 }): Promise<CatalogCitationResult> {
   if (isThemeUncertaintyMessage(input.text)) {
-    return { products: [], best: null, bestScore: 0 };
+    return { products: [], best: null, bestScore: 0, highConfidence: false };
   }
   const texts = [input.text];
   const minScore = input.minScore ?? CITED_PRODUCT_MATCH_MIN;
-  const terms = collectCatalogSearchTerms(input.text);
+  const terms = filterCatalogCitationSearchTerms(collectCatalogSearchTerms(input.text));
 
   const byExplicit = await fetchExplicitCatalogProducts(input.locale, input.text);
   const explicitSlugs = new Set(byExplicit.map((p) => p.slug));
@@ -104,6 +185,7 @@ export async function detectCatalogProductCitations(input: {
     .map((product) => {
       const rawScore = computeExplicitProductMatchScore(product, texts);
       const explicitPatternHit = explicitSlugs.has(product.slug);
+      const codeHit = codes.some((code) => matchesCatalogCodeTerm(product.slug, product.canonical_name, code));
       const adjusted = adjustCitationContextScore(
         product,
         input.text,
@@ -115,21 +197,29 @@ export async function detectCatalogProductCitations(input: {
         product,
         score: adjusted,
         rawScore,
-        codeHit: codes.some((code) => matchesCatalogCodeTerm(product.slug, product.canonical_name, code)),
+        codeHit,
         explicitPatternHit,
+        highConfidence: isHighConfidenceCatalogCitation({
+          explicitPatternHit,
+          codeHit,
+          product,
+          texts,
+        }),
       };
     })
     .filter(
       (item) =>
-        item.score >= minScore ||
-        item.codeHit ||
-        item.explicitPatternHit ||
-        productHasNamePriority(item.product, texts),
+        item.highConfidence &&
+        (item.score >= minScore ||
+          item.codeHit ||
+          item.explicitPatternHit ||
+          productHasNamePriority(item.product, texts)),
     )
     .sort(
       (a, b) =>
         Number(b.explicitPatternHit) - Number(a.explicitPatternHit) ||
         Number(b.codeHit) - Number(a.codeHit) ||
+        Number(b.highConfidence) - Number(a.highConfidence) ||
         b.score - a.score,
     );
 
@@ -139,6 +229,7 @@ export async function detectCatalogProductCitations(input: {
     products,
     best: best?.product ?? null,
     bestScore: best?.score ?? 0,
+    highConfidence: Boolean(best?.highConfidence && products.length > 0),
   };
 }
 

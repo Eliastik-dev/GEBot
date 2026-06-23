@@ -66,7 +66,7 @@ export const env = {
   /** Max nodes injected into the LLM context (catalog blocks + FT/FDS chunks). */
   DIAGNOSTIC_MAX_CONTEXT_NODES: Number(process.env.DIAGNOSTIC_MAX_CONTEXT_NODES ?? "128"),
   /** Max FT/FDS chunks retrieved per product slug (full datasheet ≈ 5–20 chunks). */
-  PDF_CHUNKS_PER_SLUG: Number(process.env.PDF_CHUNKS_PER_SLUG ?? "48"),
+  PDF_CHUNKS_PER_SLUG: Number(process.env.PDF_CHUNKS_PER_SLUG ?? "1"),
   /** Distinct source URLs listed in the prompt footer. */
   DIAGNOSTIC_MAX_SOURCE_URLS: Number(process.env.DIAGNOSTIC_MAX_SOURCE_URLS ?? "12"),
   CHAT_HISTORY_LIMIT: Number(process.env.CHAT_HISTORY_LIMIT ?? "10"),

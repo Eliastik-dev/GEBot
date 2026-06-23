@@ -1,10 +1,8 @@
 /**
  * Use thumbs-up / thumbs-down feedback to steer catalog routing and LLM prompting.
- * Cross-session: past 👎/👍 in retrieval_feedback_events (embedding + lexical match).
+ * Cross-session: recent rows in retrieval_feedback_events (lexical match only — no live embedding API).
  */
 
-import { Mistral } from "@mistralai/mistralai";
-import { env } from "../config/env.js";
 import { supabase } from "../config/supabase.js";
 import type { Locale } from "../types/index.js";
 import { feedbackEmbeddingText } from "../utils/conversation-context.js";
@@ -52,13 +50,11 @@ type FeedbackRow = {
 
 type ScoredFeedbackRow = { row: FeedbackRow; embedScore: number; lexicalScore: number };
 
-const POSITIVE_SIMILARITY_MIN = 0.26;
-const NEGATIVE_SIMILARITY_MIN = 0.24;
-/** Cross-session 👎: lower bar than one-shot routing penalty. */
-const CROSS_SESSION_EMBED_MIN = 0.2;
+/** Cross-session 👎/👍: lexical overlap threshold (no embedding API on chat turn). */
 const CROSS_SESSION_LEXICAL_MIN = 0.28;
 const CROSS_SESSION_LEXICAL_MIN_TOKENS = 2;
-const FEEDBACK_POOL_LIMIT = 120;
+/** Max historical feedback rows loaded per polarity — keeps chat-turn DB work bounded. */
+const FEEDBACK_POOL_LIMIT = 20;
 
 const LEXICAL_STOPWORDS = new Set([
   "avec",
@@ -122,63 +118,6 @@ const LEXICAL_STOPWORDS = new Set([
   "user",
 ]);
 
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i]! * b[i]!;
-    normA += a[i]! * a[i]!;
-    normB += b[i]! * b[i]!;
-  }
-  const denom = Math.sqrt(normA) * Math.sqrt(normB);
-  return denom > 0 ? dot / denom : 0;
-}
-
-let embedClient: Mistral | null = null;
-
-function getEmbedClient(): Mistral {
-  if (!embedClient) embedClient = new Mistral({ apiKey: env.MISTRAL_API_KEY });
-  return embedClient;
-}
-
-const EMBED_BATCH_SIZE = 8;
-const EMBED_MAX_CHARS = 1_200;
-const EMBED_MIN_CHARS = 8;
-
-function sanitizeEmbedInput(text: string): string {
-  return text
-    .slice(0, EMBED_MAX_CHARS)
-    .replace(/[\u0000-\u001f]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-async function embedTexts(texts: string[]): Promise<number[][]> {
-  const sanitized = texts.map((t) => sanitizeEmbedInput(t));
-  const vectors: number[][] = sanitized.map(() => []);
-  const pending: Array<{ index: number; text: string }> = [];
-  for (let i = 0; i < sanitized.length; i++) {
-    const text = sanitized[i]!;
-    if (text.length >= EMBED_MIN_CHARS) pending.push({ index: i, text });
-  }
-  if (pending.length === 0) return vectors;
-
-  const client = getEmbedClient();
-  for (let i = 0; i < pending.length; i += EMBED_BATCH_SIZE) {
-    const batch = pending.slice(i, i + EMBED_BATCH_SIZE);
-    const { data } = await client.embeddings.create({
-      model: "mistral-embed",
-      inputs: batch.map((item) => item.text),
-    });
-    for (let j = 0; j < batch.length; j++) {
-      vectors[batch[j]!.index] = data[j]?.embedding ?? [];
-    }
-  }
-  return vectors;
-}
-
 function normalizeSlugList(slugs: unknown): string[] {
   if (!Array.isArray(slugs)) return [];
   return [...new Set(slugs.map(String).filter((s) => s.length > 2))];
@@ -238,7 +177,7 @@ function significantTokens(text: string): Set<string> {
   );
 }
 
-/** Token overlap for cross-session matching when embeddings are unavailable or weak. */
+/** Token overlap for cross-session matching — no external embedding API. */
 export function lexicalFeedbackSimilarity(query: string, feedbackText: string): number {
   const queryTokens = significantTokens(query);
   const feedbackTokens = significantTokens(feedbackText);
@@ -254,14 +193,6 @@ export function lexicalFeedbackSimilarity(query: string, feedbackText: string): 
   return shared / denominator;
 }
 
-function isCrossSessionNegativeMatch(embedScore: number, lexicalScore: number): boolean {
-  return embedScore >= CROSS_SESSION_EMBED_MIN || lexicalScore >= CROSS_SESSION_LEXICAL_MIN;
-}
-
-function isCrossSessionPositiveMatch(embedScore: number, lexicalScore: number): boolean {
-  return embedScore >= CROSS_SESSION_EMBED_MIN || lexicalScore >= CROSS_SESSION_LEXICAL_MIN;
-}
-
 function scoreFeedbackPool(query: string, pool: FeedbackRow[]): ScoredFeedbackRow[] {
   return pool.map((row) => {
     const text = feedbackEmbeddingText(row);
@@ -271,47 +202,6 @@ function scoreFeedbackPool(query: string, pool: FeedbackRow[]): ScoredFeedbackRo
       lexicalScore: lexicalFeedbackSimilarity(query, text),
     };
   });
-}
-
-function mergeCrossSessionNegativeHits(
-  scored: ScoredFeedbackRow[],
-  embedScores: number[],
-  poolOffset: number,
-): ScoredFeedbackRow[] {
-  const merged = new Map<string, ScoredFeedbackRow>();
-  for (let i = 0; i < scored.length; i++) {
-    const item = scored[i]!;
-    item.embedScore = embedScores[poolOffset + i] ?? 0;
-    const key = feedbackEmbeddingText(item.row).slice(0, 200);
-    if (!isCrossSessionNegativeMatch(item.embedScore, item.lexicalScore)) continue;
-    const prev = merged.get(key);
-    if (!prev || item.embedScore + item.lexicalScore > prev.embedScore + prev.lexicalScore) {
-      merged.set(key, item);
-    }
-  }
-  return [...merged.values()].sort(
-    (a, b) => b.embedScore + b.lexicalScore - (a.embedScore + a.lexicalScore),
-  );
-}
-
-function mergeCrossSessionPositiveHits(
-  scored: ScoredFeedbackRow[],
-  embedScores: number[],
-): ScoredFeedbackRow[] {
-  const merged = new Map<string, ScoredFeedbackRow>();
-  for (let i = 0; i < scored.length; i++) {
-    const item = scored[i]!;
-    item.embedScore = embedScores[i] ?? 0;
-    const key = feedbackEmbeddingText(item.row).slice(0, 200);
-    if (!isCrossSessionPositiveMatch(item.embedScore, item.lexicalScore)) continue;
-    const prev = merged.get(key);
-    if (!prev || item.embedScore + item.lexicalScore > prev.embedScore + prev.lexicalScore) {
-      merged.set(key, item);
-    }
-  }
-  return [...merged.values()].sort(
-    (a, b) => b.embedScore + b.lexicalScore - (a.embedScore + a.lexicalScore),
-  );
 }
 
 function emptyContext(
@@ -477,35 +367,9 @@ function applyLexicalCrossSessionPositiveFallback(
   }
 }
 
-function buildGoldenExamples(
-  crossSessionPositiveHits: ScoredFeedbackRow[],
-  positiveHits: Array<{ row: FeedbackRow; score: number }>,
-): GoldenExample[] {
-  const examples: GoldenExample[] = [];
-
-  for (const { row } of crossSessionPositiveHits) {
-    if (typeof row.assistant_reply !== "string" || !row.assistant_reply.trim()) continue;
-    examples.push({
-      userQuery: feedbackEmbeddingText(row).slice(0, 2_500),
-      assistantReply: row.assistant_reply.trim().slice(0, 2_500),
-    });
-    if (examples.length >= 2) return examples;
-  }
-
-  for (const { row } of positiveHits) {
-    if (typeof row.assistant_reply !== "string" || !row.assistant_reply.trim()) continue;
-    examples.push({
-      userQuery: feedbackEmbeddingText(row).slice(0, 2_500),
-      assistantReply: row.assistant_reply.trim().slice(0, 2_500),
-    });
-    if (examples.length >= 2) return examples;
-  }
-
-  return examples;
-}
-
 /**
  * Single pass over stored feedback: slug boosts/penalties for routing + few-shot hints for the LLM.
+ * Uses session SQL + lexical match on the most recent feedback rows only (no Mistral embed on chat turn).
  */
 export async function resolveFeedbackRetrievalContext(
   intentQuery: string,
@@ -515,21 +379,12 @@ export async function resolveFeedbackRetrievalContext(
   const query = intentQuery.trim();
   if (!query) return emptyContext([], []);
 
-  const embedQuery = query.slice(0, EMBED_MAX_CHARS);
-
   const [sessionPenalties, sessionBoosts, positiveRows, negativeRows] = await Promise.all([
     sessionId ? loadSessionDislikedSlugs(sessionId) : Promise.resolve([]),
     sessionId ? loadSessionLikedSlugs(sessionId) : Promise.resolve([]),
     loadFeedbackRows(1, FEEDBACK_POOL_LIMIT),
     loadFeedbackRows(-1, FEEDBACK_POOL_LIMIT),
   ]);
-
-  const penalizeSlugs = new Set<string>();
-  const boostSlugs = new Set<string>();
-  const crossSessionPenalizeSlugs = new Set<string>();
-  const crossSessionBoostSlugs = new Set<string>();
-  let goldenExamples: GoldenExample[] = [];
-  let negativeExamples: NegativeExample[] = [];
 
   const positivePool = filterByLocale(positiveRows, locale);
   const negativePool = filterByLocale(negativeRows, locale);
@@ -538,108 +393,34 @@ export async function resolveFeedbackRetrievalContext(
     return emptyContext(sessionPenalties, sessionBoosts);
   }
 
-  const lexicalNegativeScored = scoreFeedbackPool(embedQuery, negativePool);
-  const lexicalPositiveScored = scoreFeedbackPool(embedQuery, positivePool);
+  const crossSessionPenalizeSlugs = new Set<string>();
+  const crossSessionBoostSlugs = new Set<string>();
+  const penalizeSlugs = new Set<string>();
+  const boostSlugs = new Set<string>();
+  const goldenExamples: GoldenExample[] = [];
+  const negativeExamples: NegativeExample[] = [];
 
-  try {
-    const allRows = [...positivePool, ...negativePool];
-    const vectors = await embedTexts([embedQuery, ...allRows.map((row) => feedbackEmbeddingText(row))]);
-    const queryVec = vectors[0];
-    if (!queryVec?.length) {
-      applyLexicalCrossSessionNegativeFallback(embedQuery, negativePool, crossSessionPenalizeSlugs, negativeExamples);
-      applyLexicalCrossSessionPositiveFallback(embedQuery, positivePool, crossSessionBoostSlugs, goldenExamples);
-      return {
-        ...emptyContext(sessionPenalties, sessionBoosts),
-        crossSessionPenalizeSlugs: [...crossSessionPenalizeSlugs],
-        crossSessionBoostSlugs: [...crossSessionBoostSlugs],
-        goldenExamples,
-        negativeExamples,
-      };
+  applyLexicalCrossSessionNegativeFallback(query, negativePool, crossSessionPenalizeSlugs, negativeExamples);
+  applyLexicalCrossSessionPositiveFallback(query, positivePool, crossSessionBoostSlugs, goldenExamples);
+
+  const negativeHits = scoreFeedbackPool(query, negativePool)
+    .filter((item) => item.lexicalScore >= CROSS_SESSION_LEXICAL_MIN)
+    .sort((a, b) => b.lexicalScore - a.lexicalScore)
+    .slice(0, 3);
+  for (const { row } of negativeHits) {
+    for (const slug of collectFeedbackProductSlugsFromRow(row)) {
+      penalizeSlugs.add(slug);
     }
-
-    const positiveEmbedScores = positivePool.map((_, idx) => cosineSimilarity(queryVec, vectors[idx + 1] ?? []));
-    const negativeEmbedScores = negativePool.map((_, idx) =>
-      cosineSimilarity(queryVec, vectors[positivePool.length + idx + 1] ?? []),
-    );
-
-    const positiveHits = positivePool
-      .map((row, idx) => ({
-        row,
-        score: positiveEmbedScores[idx] ?? 0,
-      }))
-      .filter((item) => item.score >= POSITIVE_SIMILARITY_MIN)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-
-    const negativeHits = negativePool
-      .map((row, idx) => ({
-        row,
-        score: negativeEmbedScores[idx] ?? 0,
-      }))
-      .filter((item) => item.score >= NEGATIVE_SIMILARITY_MIN)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
-
-    const crossSessionNegativeHits = mergeCrossSessionNegativeHits(
-      lexicalNegativeScored,
-      negativeEmbedScores,
-      0,
-    ).slice(0, 5);
-
-    const crossSessionPositiveHits = mergeCrossSessionPositiveHits(
-      lexicalPositiveScored,
-      positiveEmbedScores,
-    ).slice(0, 5);
-
-    goldenExamples = buildGoldenExamples(crossSessionPositiveHits, positiveHits);
-
-    const negativeExampleRows =
-      crossSessionNegativeHits.length > 0
-        ? crossSessionNegativeHits
-        : negativeHits.map(({ row, score }) => ({
-            row,
-            embedScore: score,
-            lexicalScore: lexicalFeedbackSimilarity(embedQuery, feedbackEmbeddingText(row)),
-          }));
-
-    negativeExamples = negativeExampleRows.slice(0, 2).map(({ row }) => ({
-      userQuery: feedbackEmbeddingText(row).slice(0, 2_500),
-      productSlugs: collectFeedbackProductSlugsFromRow(row),
-      retrievalPath: row.retrieval_path ?? null,
-      recommendedProduct: row.recommended_product ?? null,
-    }));
-
-    for (const { row } of positiveHits) {
-      for (const slug of collectFeedbackProductSlugsFromRow(row)) {
-        boostSlugs.add(slug);
-      }
-    }
-    for (const { row } of negativeHits) {
-      for (const slug of collectFeedbackProductSlugsFromRow(row)) {
-        penalizeSlugs.add(slug);
-      }
-    }
-    for (const { row } of crossSessionNegativeHits) {
-      for (const slug of collectFeedbackProductSlugsFromRow(row)) {
-        crossSessionPenalizeSlugs.add(slug);
-      }
-    }
-    for (const { row } of crossSessionPositiveHits) {
-      for (const slug of collectFeedbackProductSlugsFromRow(row)) {
-        crossSessionBoostSlugs.add(slug);
-      }
-    }
-  } catch (error) {
-    console.warn("[feedback-retrieval] embedding search failed, lexical cross-session fallback", error);
-    applyLexicalCrossSessionNegativeFallback(embedQuery, negativePool, crossSessionPenalizeSlugs, negativeExamples);
-    applyLexicalCrossSessionPositiveFallback(embedQuery, positivePool, crossSessionBoostSlugs, goldenExamples);
   }
 
-  if (crossSessionPenalizeSlugs.size === 0 && negativePool.length > 0) {
-    applyLexicalCrossSessionNegativeFallback(embedQuery, negativePool, crossSessionPenalizeSlugs, negativeExamples);
-  }
-  if (crossSessionBoostSlugs.size === 0 && positivePool.length > 0) {
-    applyLexicalCrossSessionPositiveFallback(embedQuery, positivePool, crossSessionBoostSlugs, goldenExamples);
+  const positiveHits = scoreFeedbackPool(query, positivePool)
+    .filter((item) => item.lexicalScore >= CROSS_SESSION_LEXICAL_MIN)
+    .sort((a, b) => b.lexicalScore - a.lexicalScore)
+    .slice(0, 3);
+  for (const { row } of positiveHits) {
+    for (const slug of collectFeedbackProductSlugsFromRow(row)) {
+      boostSlugs.add(slug);
+    }
   }
 
   return {

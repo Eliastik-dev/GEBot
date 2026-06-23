@@ -526,8 +526,8 @@ function rankPdfChunk(item: unknown, materialKeyword: string | null | undefined,
 }
 
 /**
- * Retrieve all indexed FT/FDS PDF chunks for catalogue slugs — used when product_knowledge routing
- * alone would leave the LLM without raw datasheet text.
+ * Retrieve at most one indexed FT/FDS PDF chunk per slug — fallback only when product_knowledge
+ * synthesis is unavailable. Prefer structured SynthesizedProductFacts for recommendations.
  */
 export async function retrievePdfChunksForSlugs(
   index: VectorStoreIndex,
@@ -536,16 +536,18 @@ export async function retrievePdfChunksForSlugs(
   options?: {
     materialKeyword?: string | null;
     queryText?: string;
+    /** Hard cap per slug (default 1). */
+    maxChunksPerSlug?: number;
   },
 ): Promise<unknown[]> {
-  const topK = env.PDF_CHUNKS_PER_SLUG;
+  const maxChunksPerSlug = Math.max(1, Math.min(options?.maxChunksPerSlug ?? env.PDF_CHUNKS_PER_SLUG, 1));
   const queryText = options?.queryText?.trim() || options?.materialKeyword?.trim() || "compatibilite materiau fluide";
   const uniqueSlugs = [...new Set(slugs.filter(Boolean))].slice(0, env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS);
   const collected: unknown[] = [];
 
   for (const slug of uniqueSlugs) {
     const retriever = index.asRetriever({
-      similarityTopK: topK,
+      similarityTopK: Math.max(maxChunksPerSlug, 3),
       filters: {
         filters: [
           { key: "locale", value: locale, operator: "==" },
@@ -568,7 +570,7 @@ export async function retrievePdfChunksForSlugs(
           rankPdfChunk(b, options?.materialKeyword, queryText) - rankPdfChunk(a, options?.materialKeyword, queryText),
       );
 
-    collected.push(...ranked);
+    collected.push(...ranked.slice(0, maxChunksPerSlug));
   }
 
   return collected;

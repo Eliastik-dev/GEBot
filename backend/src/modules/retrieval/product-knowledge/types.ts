@@ -27,6 +27,8 @@ export type CatalogCitationResult = {
   products: ProductKnowledgeRow[];
   best: ProductKnowledgeRow | null;
   bestScore: number;
+  /** True only for explicit brand/code/name citations — not generic plumbing vocabulary. */
+  highConfidence: boolean;
 };
 
 /** Produit cité explicitement par l'utilisateur (hors top tags/thème). */

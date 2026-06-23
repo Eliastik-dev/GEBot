@@ -219,9 +219,10 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
             text: ctx.userCitationScanText,
             audience: ctx.audience,
             limit: env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS,
-          }).catch(() => ({ products: [], best: null, bestScore: 0 }))
-        : { products: [], best: null, bestScore: 0 };
-    ctx.hasCatalogCitation = ctx.catalogCitation.products.length > 0;
+          }).catch(() => ({ products: [], best: null, bestScore: 0, highConfidence: false }))
+        : { products: [], best: null, bestScore: 0, highConfidence: false };
+    ctx.hasCatalogCitation =
+      ctx.catalogCitation.highConfidence && ctx.catalogCitation.products.length > 0;
     ctx.explicitProductTargeted = 
       ctx.hasCatalogCitation ||
       isExplicitProductTargeted([ctx.citationScanText, ctx.effectiveQuery, message, ctx.queryForRetrieval]);
@@ -232,6 +233,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
 
     if (
       ctx.hasCatalogCitation &&
+      ctx.catalogCitation.highConfidence &&
       (isFactualProductQuestion(ctx.citationScanText) || ctx.catalogCitation.bestScore >= EXPLICIT_PRODUCT_MATCH_MIN)
     ) {
       ctx.extractedMeta.needs_clarification = false;
@@ -920,14 +922,19 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       ctx.retrievalCount = ctx.resolvedNodes.length;
     }
 
-    ctx.pdfSupplementSlugs = ctx.factualProductMode
-      ? ctx.pkProductSlugs.slice(0, 2)
-      : [...new Set([...ctx.pkProductSlugs, ...ctx.catalogCitation.products.map((p) => p.slug)])].slice(0, 4);
-    if (ctx.pdfSupplementSlugs.length > 0) {
+    const hasSynthesizedCatalog =
+      ctx.retrievalPath === "product_knowledge" || ctx.pkResolvedProducts.length > 0;
+    ctx.pdfSupplementSlugs = hasSynthesizedCatalog
+      ? []
+      : ctx.factualProductMode
+        ? ctx.pkProductSlugs.slice(0, 1)
+        : [...new Set([...ctx.pkProductSlugs, ...ctx.catalogCitation.products.map((p) => p.slug)])].slice(0, 2);
+    if (!hasSynthesizedCatalog && ctx.pdfSupplementSlugs.length > 0) {
       try {
         const pdfNodes = await retrievePdfChunksForSlugs(deps.index, ctx.pdfSupplementSlugs, ctx.pkLocale, {
           materialKeyword: ctx.extractedMeta.material,
           queryText: ctx.factualProductMode ? ctx.citationScanText : ctx.searchQuery,
+          maxChunksPerSlug: 1,
         });
         if (pdfNodes.length > 0) {
           ctx.resolvedNodes = mergeRetrievalNodes(ctx.resolvedNodes, pdfNodes);
@@ -939,11 +946,18 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
             slugs: ctx.pdfSupplementSlugs,
             pdfChunks: pdfNodes.length,
             totalNodes: ctx.retrievalCount,
+            synthesizedCatalogSkipped: hasSynthesizedCatalog,
           });
         }
       } catch (err) {
         console.warn("[/api/chat] catalog_pdf_supplement_failed", { sessionId, err });
       }
+    } else if (hasSynthesizedCatalog) {
+      console.log("[/api/chat] catalog_pdf_supplement_skipped", {
+        sessionId,
+        reason: "product_knowledge_synthesis_present",
+        pkSlugs: ctx.pkResolvedProducts.map((p) => p.slug),
+      });
     }
 
     if (ctx.informationalRetrievalQuestion || ctx.extractedMeta.intent === "general_technical") {
