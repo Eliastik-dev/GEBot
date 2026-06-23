@@ -106,11 +106,15 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
     ctx.preAnalysisTranscript = buildPreAnalysisTranscript(ctx.historyMessages, message);
     ctx.userCitationScanText = buildUserCitationScanText(ctx.historyMessages, message);
     ctx.citationScanText = `${ctx.preAnalysisTranscript}\n${message}`;
+    const intentExtractorStart = performance.now();
     const diagnosticResult: DiagnosticAnalysis = await runDiagnosticAnalysis(
       ctx.preAnalysisTranscript,
       locale,
       message,
     );
+    if (ctx.pipelineTiming) {
+      ctx.pipelineTiming.intentExtractorMs = Math.round(performance.now() - intentExtractorStart);
+    }
     ctx.diagnosticResult = diagnosticResult;
     ctx.extractedMeta = { ...diagnosticResult.metadata };
     if (ctx.jointPasteContext) {
@@ -767,6 +771,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
     }
 
     if (ctx.retrievalPath === "vector_rag") {
+      const vectorSearchStart = performance.now();
       const retrievalPoolK = Math.max(env.TOP_K, Math.round(env.TOP_K * env.RETRIEVAL_POOL_MULTIPLIER));
       const retriever = deps.index.asRetriever({
         similarityTopK: retrievalPoolK,
@@ -916,6 +921,9 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       ctx.resolvedNodes = prioritizeTechnicalSheets(ctx.resolvedNodes);
       ctx.resolvedNodes = capContextNodes(ctx.resolvedNodes, env.DIAGNOSTIC_MAX_CONTEXT_NODES);
       ctx.retrievalCount = ctx.resolvedNodes.length;
+      if (ctx.pipelineTiming) {
+        ctx.pipelineTiming.vectorSearchMs = Math.round(performance.now() - vectorSearchStart);
+      }
     } else {
       ctx.retrievalCount = ctx.resolvedNodes.length;
     }

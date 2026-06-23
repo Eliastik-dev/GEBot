@@ -149,6 +149,11 @@ export async function generateAndStreamReply(ctx: ChatPipelineBindings): Promise
         audience: ctx.audience,
         locale,
         res,
+        profiling: {
+          onFirstToken: (ttftMs) => {
+            if (ctx.pipelineTiming) ctx.pipelineTiming.ttftMs = ttftMs;
+          },
+        },
       });
     } catch (err) {
       const generationError = err instanceof Error ? err.message : "Unknown generation error";

@@ -436,6 +436,9 @@ export async function queryWithRetryAndFallback(params: {
   audience: Audience;
   locale: Locale;
   res: express.Response;
+  profiling?: {
+    onFirstToken?: (ttftMs: number) => void;
+  };
 }): Promise<string> {
   const models = [env.MISTRAL_CHAT_MODEL, ...parseFallbackModels(env.MISTRAL_CHAT_FALLBACK_MODELS)];
   const maxRetries = Math.max(1, env.MISTRAL_CHAT_MAX_RETRIES);
@@ -469,16 +472,22 @@ export async function queryWithRetryAndFallback(params: {
             "status",
           );
         }
+        const mistralPromptSentAt = performance.now();
         const stream = await withTimeout(
           queryEngine.query({ query: params.fullQuery, stream: true }),
           FULL_RESPONSE_BUDGET_MS,
           "MISTRAL_QUERY",
         );
         let answer = "";
+        let firstTokenLogged = false;
         sseWriteWithSession(params.res, params.sessionId, { status: "generating", audience: params.audience, locale: params.locale }, "status");
         for await (const chunk of stream) {
           const delta = (chunk as { delta?: string }).delta ?? "";
           if (!delta) continue;
+          if (!firstTokenLogged) {
+            firstTokenLogged = true;
+            params.profiling?.onFirstToken?.(Math.round(performance.now() - mistralPromptSentAt));
+          }
           answer += delta;
           sseWriteWithSession(params.res, params.sessionId, { delta, audience: params.audience }, "chunk");
         }
