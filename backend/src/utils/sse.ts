@@ -1,4 +1,5 @@
 import type express from "express";
+import { sessionAuthFields } from "./session-token.js";
 
 export function sseHeaders() {
   return {
@@ -21,5 +22,15 @@ export function startSse(res: express.Response) {
 export function sseWrite(res: express.Response, data: unknown, event?: string) {
   if (event) res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+/** SSE payload with signed session token for client-side feedback auth. */
+export function sseWriteWithSession(
+  res: express.Response,
+  sessionId: string,
+  data: Record<string, unknown>,
+  event?: string,
+): void {
+  sseWrite(res, { ...data, ...sessionAuthFields(sessionId) }, event);
 }
 

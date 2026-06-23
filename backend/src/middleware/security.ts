@@ -66,7 +66,7 @@ export const corsMiddleware: RequestHandler = (req, res, next) => {
       callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "X-Session-Id"],
+    allowedHeaders: ["Content-Type", "X-Session-Id", "X-Session-Token"],
     exposedHeaders: ["Content-Type"],
     maxAge: 86_400,
     credentials: false,

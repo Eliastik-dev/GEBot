@@ -4,6 +4,7 @@ import { ensureSession } from "../services/database.service.js";
 import { geolocateIp } from "../services/rag.service.js";
 import { normalizeLocale } from "../utils/locale.js";
 import { isValidUuid } from "../utils/sanitize.js";
+import { sessionAuthFields } from "../utils/session-token.js";
 import { getClientIp } from "../utils/session.js";
 import type { geolocationQuerySchema } from "../validation/schemas.js";
 import type { z } from "zod";
@@ -24,14 +25,14 @@ export async function getGeolocation(req: Request, res: Response) {
       const geolocation = await geolocateIp(ip);
       await ensureSession(sessionId, locale, true, geolocation.countryCode);
       res.json({
-        sessionId,
+        ...sessionAuthFields(sessionId),
         countryCode: geolocation.countryCode,
         isOutsideFrance: geolocation.countryCode ? geolocation.countryCode !== "FR" : null,
       });
     } catch (error) {
       console.warn("[/api/geolocation] failed:", error);
       res.json({
-        sessionId,
+        ...sessionAuthFields(sessionId),
         countryCode: null,
         isOutsideFrance: null,
       });

@@ -2,13 +2,21 @@ import type { Request, Response } from "express";
 import { supabase } from "../config/supabase.js";
 import { scheduleRetrievalFeedback } from "../services/retrieval-feedback.service.js";
 import { safeErrorPayload } from "../utils/http.js";
+import { readSessionTokenFromRequest, verifySessionToken } from "../utils/session-token.js";
 import type { feedbackBodySchema } from "../validation/schemas.js";
 import type { z } from "zod";
 
 type FeedbackBody = z.infer<typeof feedbackBodySchema>;
 
 export async function postFeedback(req: Request, res: Response) {
-    const { messageId, sessionId, feedback } = req.body as FeedbackBody;
+    const body = req.body as FeedbackBody;
+    const { messageId, sessionId, feedback } = body;
+    const sessionToken = readSessionTokenFromRequest(req.header("x-session-token"), body.sessionToken);
+
+    if (!sessionToken || !verifySessionToken(sessionToken, sessionId)) {
+      res.status(401).json({ error: "Invalid or expired session token" });
+      return;
+    }
 
     try {
       const { error } = await supabase

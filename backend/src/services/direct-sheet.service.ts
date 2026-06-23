@@ -19,7 +19,7 @@ import {
   sanitizeDocumentationLinks,
   stripLeadingConversationGreeting,
 } from "../utils/response.js";
-import { sseWrite } from "../utils/sse.js";
+import { sseWriteWithSession } from "../utils/sse.js";
 import { classifyProblemTypeWithLlm } from "./ai.service.js";
 import { logProductAnalytics, logQuery, saveMessage } from "./database.service.js";
 
@@ -57,7 +57,7 @@ export async function deliverDirectTechnicalSheetTurn(ctx: DirectSheetTurnContex
     sessionTheme: ctx.sessionTheme ?? null,
     feedbackCorrection: Boolean(ctx.trainingQuery),
   });
-  sseWrite(ctx.res, { delta: answer, sessionId: ctx.sessionId, audience: ctx.audience }, "chunk");
+  sseWriteWithSession(ctx.res, ctx.sessionId, { delta: answer, audience: ctx.audience }, "chunk");
 
   answer = stripLeadingConversationGreeting(answer, ctx.ongoingConversation);
   answer = sanitizeDocumentationLinks(answer);
@@ -76,11 +76,11 @@ export async function deliverDirectTechnicalSheetTurn(ctx: DirectSheetTurnContex
     : buildAmazonSection(ctx.locale, { productName: null, amazonUrl: getAmazonDefaultUrl(ctx.locale, null) });
 
   answer = `${removeAmazonSections(answer)}\n\n${amazonSection}`.trim();
-  sseWrite(ctx.res, { delta: `\n\n${amazonSection}`, sessionId: ctx.sessionId, audience: ctx.audience }, "chunk");
+  sseWriteWithSession(ctx.res, ctx.sessionId, { delta: `\n\n${amazonSection}`, audience: ctx.audience }, "chunk");
 
   if (resellerSection) {
     answer += `\n\n${resellerSection}`;
-    sseWrite(ctx.res, { delta: `\n\n${resellerSection}`, sessionId: ctx.sessionId, audience: ctx.audience }, "chunk");
+    sseWriteWithSession(ctx.res, ctx.sessionId, { delta: `\n\n${resellerSection}`, audience: ctx.audience }, "chunk");
   }
 
   answerCache.set(ctx.cacheKey, {
@@ -131,11 +131,11 @@ export async function deliverDirectTechnicalSheetTurn(ctx: DirectSheetTurnContex
     `logProductAnalytics.${logStatus}`,
   );
 
-  sseWrite(
+  sseWriteWithSession(
     ctx.res,
+    ctx.sessionId,
     {
       done: true,
-      sessionId: ctx.sessionId,
       audience: ctx.audience,
       handoff: ctx.handoff,
       responseMs: Date.now() - ctx.startedAt,

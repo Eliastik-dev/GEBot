@@ -89,7 +89,7 @@ import {
 import { resolveJointPasteClarificationContext } from "../utils/joint-paste.js";
 import { safeErrorPayload, isProduction } from "../utils/http.js";
 import { getIncomingSessionId } from "../utils/session.js";
-import { startSse, sseWrite } from "../utils/sse.js";
+import { startSse, sseWriteWithSession } from "../utils/sse.js";
 import type { chatBodySchema } from "../validation/schemas.js";
 import type { VectorStoreIndex } from "llamaindex";
 import type { z } from "zod";
@@ -162,7 +162,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         geoCountry: geoCountryFromBody,
       });
       startSse(res);
-      sseWrite(res, { status: "searching", sessionId, locale }, "status");
+      sseWriteWithSession(res, sessionId, { status: "searching", sessionId, locale }, "status");
       const ttftElapsed = Date.now() - startedAt;
       if (ttftElapsed > TTFT_TARGET_MS) {
         console.warn("[/api/chat] TTFT target exceeded before retrieval", { sessionId, ttftElapsed });
@@ -196,7 +196,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       if (!audience) {
         const onboardingQuestion = ONBOARDING_QUESTION_BY_LOCALE[locale];
         startSse(res);
-        sseWrite(res, { delta: onboardingQuestion, sessionId }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: onboardingQuestion, sessionId }, "chunk");
         await saveMessage(sessionId, "assistant", onboardingQuestion);
         fireAndForget(
           logQuery({
@@ -210,7 +210,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.awaiting_profile",
         );
-        sseWrite(res, { done: true, sessionId, geoCountry: effectiveGeoCountry }, "done");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -218,7 +218,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       if (hasOngoingConversation(historyMessages) && isGratitudeOrClosingMessage(message)) {
         const response = buildGratitudeReply(locale, audience);
         startSse(res);
-        sseWrite(res, { delta: response, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: response, sessionId, audience }, "chunk");
         await saveMessage(sessionId, "assistant", response);
         fireAndForget(
           logQuery({
@@ -232,7 +232,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.gratitude_closing",
         );
-        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -268,7 +268,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         const response = [buildPurchaseAvailabilityIntro(locale, productLabel), amazonSection, resellerSection]
           .filter(Boolean)
           .join("\n\n");
-        sseWrite(res, { delta: response, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: response, sessionId, audience }, "chunk");
         await saveMessage(sessionId, "assistant", response, {
           response_context: {
             recommended_product: productLabel,
@@ -300,9 +300,10 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logProductAnalytics.purchase_availability_short",
         );
-        sseWrite(
+        sseWriteWithSession(
           res,
-          { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry },
+          sessionId,
+          { done: true, audience, handoff, geoCountry: effectiveGeoCountry },
           "done",
         );
         res.end();
@@ -317,7 +318,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         });
         const response = [followUp, amazonSection].filter(Boolean).join("\n\n");
         startSse(res);
-        sseWrite(res, { delta: response, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: response, sessionId, audience }, "chunk");
         await saveMessage(sessionId, "assistant", response);
         fireAndForget(
           logQuery({
@@ -331,7 +332,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.complementary",
         );
-        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -351,7 +352,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         });
         const response = [resellerSection || fallbackMessageByLocale[locale], amazonSection].filter(Boolean).join("\n\n");
         startSse(res);
-        sseWrite(res, { delta: response, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: response, sessionId, audience }, "chunk");
         await saveMessage(sessionId, "assistant", response);
         fireAndForget(
           logQuery({
@@ -365,7 +366,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.reseller",
         );
-        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -373,7 +374,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       if (detectedAudience && isProfileOnlyMessage(message)) {
         const followUp = THEME_QUESTION_BY_LOCALE[locale];
         startSse(res);
-        sseWrite(res, { delta: followUp, sessionId, audience, showThemeReplies: true }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: followUp, sessionId, audience, showThemeReplies: true }, "chunk");
         await saveMessage(sessionId, "assistant", followUp);
         fireAndForget(
           logQuery({
@@ -387,7 +388,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.profile_set",
         );
-        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -402,7 +403,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         await updateSessionTheme(sessionId, detectedTheme);
         const followUp = NEXT_QUESTION_AFTER_THEME[locale];
         startSse(res);
-        sseWrite(res, { delta: followUp, sessionId, audience, theme: detectedTheme }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: followUp, sessionId, audience, theme: detectedTheme }, "chunk");
         await saveMessage(sessionId, "assistant", followUp);
         fireAndForget(
           logQuery({
@@ -416,7 +417,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.theme_set",
         );
-        sseWrite(res, { done: true, sessionId, audience, theme: detectedTheme, handoff, geoCountry: effectiveGeoCountry }, "done");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, audience, theme: detectedTheme, handoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -424,7 +425,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       if (isThemeUncertaintyMessage(message) && !effectiveTheme) {
         const reply = buildThemeUncertaintyReply(locale);
         startSse(res);
-        sseWrite(res, { delta: reply, sessionId, audience, showThemeReplies: true }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: reply, sessionId, audience, showThemeReplies: true }, "chunk");
         await saveMessage(sessionId, "assistant", reply);
         fireAndForget(
           logQuery({
@@ -438,7 +439,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.theme_uncertainty",
         );
-        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -447,7 +448,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
       if (specificClarification) {
         console.log("[/api/chat] specific_clarification", { sessionId, message });
         startSse(res);
-        sseWrite(res, { delta: specificClarification, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: specificClarification, sessionId, audience }, "chunk");
         await saveMessage(sessionId, "assistant", specificClarification);
         fireAndForget(
           logQuery({
@@ -461,7 +462,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.specific_clarification_required",
         );
-        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -576,7 +577,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         const drinkwareResponse = [drinkwareReply, escalationSection].filter(Boolean).join("\n\n");
         const drinkwareHandoff = buildHandoff(locale, audience);
         startSse(res);
-        sseWrite(res, { delta: drinkwareResponse, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: drinkwareResponse, sessionId, audience }, "chunk");
         await saveMessage(sessionId, "assistant", drinkwareResponse, {
           metadata_extracted: extractedMeta,
           intent: extractedMeta.intent,
@@ -593,9 +594,10 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.out_of_catalog_drinkware",
         );
-        sseWrite(
+        sseWriteWithSession(
           res,
-          { done: true, sessionId, audience, handoff: drinkwareHandoff, geoCountry: effectiveGeoCountry },
+          sessionId,
+          { done: true, audience, handoff: drinkwareHandoff, geoCountry: effectiveGeoCountry },
           "done",
         );
         res.end();
@@ -711,7 +713,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         if (extractedMeta.needs_clarification) {
         const response = diagnosticResult.clarification_message;
         startSse(res);
-        sseWrite(res, { delta: response, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: response, sessionId, audience }, "chunk");
         const assistantMsgId = await saveMessage(sessionId, "assistant", response, {
           metadata_extracted: extractedMeta,
           intent: extractedMeta.intent,
@@ -728,9 +730,10 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logQuery.diagnostic_clarification",
         );
-        sseWrite(
+        sseWriteWithSession(
           res,
-          { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry, messageId: assistantMsgId },
+          sessionId,
+          { done: true, audience, handoff, geoCountry: effectiveGeoCountry, messageId: assistantMsgId },
           "done",
         );
         res.end();
@@ -1030,7 +1033,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         const recommendation = resolveAmazonRecommendation(cached.value, locale);
         const productType = await classifyProblemTypeWithLlm(searchQuery, locale);
         startSse(res);
-        sseWrite(res, { delta: cached.value, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: cached.value, sessionId, audience }, "chunk");
         await saveMessage(sessionId, "assistant", cached.value);
         fireAndForget(
           logQuery({
@@ -1057,7 +1060,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           }),
           "logProductAnalytics.cache_hit",
         );
-        sseWrite(res, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, audience, handoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -1395,7 +1398,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
         const noContextResponse = [noContextReply, amazonSection, resellerSection, escalationSection].filter(Boolean).join("\n\n");
         const noContextHandoff = buildHandoff(locale, audience);
         startSse(res);
-        sseWrite(res, { delta: noContextResponse, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: noContextResponse, sessionId, audience }, "chunk");
         await saveMessage(sessionId, "assistant", noContextResponse);
         const noContextClassification = await classifyProblemTypeWithLlm(searchQuery, locale);
         fireAndForget(
@@ -1439,7 +1442,7 @@ export async function postChat(req: Request, res: Response, deps: ChatDeps) {
           value: noContextResponse,
           expiresAt: Date.now() + env.QUERY_CACHE_TTL_MS,
         });
-        sseWrite(res, { done: true, sessionId, audience, handoff: noContextHandoff, geoCountry: effectiveGeoCountry }, "done");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, audience, handoff: noContextHandoff, geoCountry: effectiveGeoCountry }, "done");
         res.end();
         return;
       }
@@ -1528,7 +1531,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
           slug: directSheetProduct.slug,
           name: directSheetProduct.canonical_name,
         });
-        sseWrite(res, { delta: answer, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: answer, sessionId, audience }, "chunk");
       } else if (directCitedProduct) {
         answer = buildDirectCitedProductReply(locale, directCitedProduct, pkRenderContext);
         console.log("[/api/chat] direct_cited_product", {
@@ -1536,7 +1539,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
           slug: directCitedProduct.slug,
           name: directCitedProduct.canonical_name,
         });
-        sseWrite(res, { delta: answer, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: answer, sessionId, audience }, "chunk");
       } else {
       try {
         console.log("Calling Mistral...", { sessionId });
@@ -1570,14 +1573,10 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
         } else {
           const escalation = buildEscalationSection(locale, audience);
           if (escalation) {
-            sseWrite(res, { delta: escalation, sessionId, audience }, "chunk");
+            sseWriteWithSession(res, sessionId, { delta: escalation, sessionId, audience }, "chunk");
           }
-          sseWrite(
-            res,
-            safeErrorPayload(generationError, err),
-            "error",
-          );
-          sseWrite(res, { done: true, sessionId, audience }, "done");
+          sseWriteWithSession(res, sessionId, { ...safeErrorPayload(generationError, err) }, "error");
+          sseWriteWithSession(res, sessionId, { done: true, sessionId, audience }, "done");
           res.end();
         }
         return;
@@ -1592,7 +1591,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
 
       if (!answer.trim()) {
         answer = getGenericNoAnswerFallback(locale);
-        sseWrite(res, { delta: answer, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: answer, sessionId, audience }, "chunk");
       }
 
       answer = stripLeadingConversationGreeting(answer, ongoingConversation);
@@ -1600,7 +1599,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
       answer = stripContradictoryProductRecommendation(answer);
       if (contradictedBefore) {
         console.warn("[/api/chat] contradictory_recommendation_stripped", { sessionId });
-        sseWrite(res, { replaceContent: answer, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { replaceContent: answer, sessionId, audience }, "chunk");
       }
       if (productFollowUp && priorRecommendedProduct) {
         answer = compactProductFollowUpAnswer(answer, priorRecommendedProduct);
@@ -1609,12 +1608,12 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
       if (containsCompetitorBrandMention(answer)) {
         console.warn("[/api/chat] competitor_brand_redacted", { sessionId });
         answer = sanitizeCompetitorBrandMentions(answer, locale);
-        sseWrite(res, { replaceContent: answer, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { replaceContent: answer, sessionId, audience }, "chunk");
       }
 
       if (containsOffTopicSink(answer, queryForRetrieval)) {
         answer = buildPipeGasClarification(locale);
-        sseWrite(res, { delta: `\n\n${answer}`, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: `\n\n${answer}`, sessionId, audience }, "chunk");
       }
 
       answer = removeComplementaryQuestionBlocks(answer);
@@ -1631,7 +1630,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
             ? ""
             : buildMoreDetailsForProductRequest(locale, audience, message);
         answer = [stripped, moreDetails].filter(Boolean).join("\n\n");
-        sseWrite(res, { replaceContent: answer, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { replaceContent: answer, sessionId, audience }, "chunk");
         console.log("[/api/chat] no_product_recommendation", {
           sessionId,
           extractedProduct,
@@ -1653,7 +1652,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
         const strippedAnswer = removeAmazonSections(answer);
         answer = `${strippedAnswer}\n\n${amazonSection}`.trim();
         if (!mistralHadAmazon) {
-          sseWrite(res, { delta: `\n\n${amazonSection}`, sessionId, audience }, "chunk");
+          sseWriteWithSession(res, sessionId, { delta: `\n\n${amazonSection}`, sessionId, audience }, "chunk");
         }
         console.log("[/api/chat] amazon_resolution", {
           sessionId,
@@ -1666,7 +1665,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
         });
         if (resellerSection && !hasStoreSection(answer) && locale !== "pl") {
           answer += `\n\n${resellerSection}`;
-          sseWrite(res, { delta: `\n\n${resellerSection}`, sessionId, audience }, "chunk");
+          sseWriteWithSession(res, sessionId, { delta: `\n\n${resellerSection}`, sessionId, audience }, "chunk");
         }
       }
 
@@ -1680,7 +1679,7 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
       if (upsell && !isComplementaryQuestion(answer)) {
         const withUpsell = `\n\n${upsell.trim()}`;
         answer += withUpsell;
-        sseWrite(res, { delta: withUpsell, sessionId, audience }, "chunk");
+        sseWriteWithSession(res, sessionId, { delta: withUpsell, sessionId, audience }, "chunk");
       }
 
       if (answer) {
@@ -1771,11 +1770,11 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
         "logProblemEvent.success",
       );
 
-      sseWrite(
+      sseWriteWithSession(
         res,
+        sessionId,
         {
           done: true,
-          sessionId,
           audience,
           handoff,
           responseMs: Date.now() - startedAt,
@@ -1807,12 +1806,8 @@ Instruction finale: reponse courte ; cite au plus une URL source du contexte si 
         );
         res.status(500).json(safeErrorPayload(errorMessage, err));
       } else {
-        sseWrite(
-          res,
-          safeErrorPayload(errorMessage, err),
-          "error",
-        );
-        sseWrite(res, { done: true, sessionId, responseMs: Date.now() - startedAt, geoCountry: geoCountryFromBody }, "done");
+        sseWriteWithSession(res, sessionId, { ...safeErrorPayload(errorMessage, err) }, "error");
+        sseWriteWithSession(res, sessionId, { done: true, sessionId, responseMs: Date.now() - startedAt, geoCountry: geoCountryFromBody }, "done");
         res.end();
       }
     }

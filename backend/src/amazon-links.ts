@@ -1,116 +1,65 @@
-import { existsSync } from "node:fs";
-import * as XLSX from "xlsx";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-type AmazonLocale = "fr" | "nl";
-
-type AmazonWorkbookRow = {
-  ref_geb?: string | number;
-  URL?: string;
-  URLs?: string;
-  url?: string;
-  designation?: string;
-  Désignation?: string;
-  pays?: string;
-};
-
+export type AmazonLocale = "fr" | "nl";
 export type AmazonLinksByLocale = Record<AmazonLocale, Record<string, string>>;
 
-function normalizeText(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9 ]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+const EMPTY_LINKS: AmazonLinksByLocale = { fr: {}, nl: {} };
+
+/** Resolve backend package root (works from src/ and dist/). */
+export function resolveBackendRoot(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 }
 
-function normalizeCountry(country: string): AmazonLocale | null {
-  const value = normalizeText(country);
-  if (value === "france" || value === "fr") return "fr";
-  if (value === "nl" || value === "nederland" || value === "pays bas" || value === "netherlands") return "nl";
-  return null;
+export function resolveAmazonLinksDataDir(configured: string): string {
+  const trimmed = configured.trim();
+  if (!trimmed) return path.join(resolveBackendRoot(), "data");
+  return path.isAbsolute(trimmed) ? trimmed : path.resolve(trimmed);
 }
 
-function inferLocaleFromSheetName(sheetName: string): AmazonLocale | null {
-  const normalized = normalizeText(sheetName);
-  if (normalized.includes("amazon fr")) return "fr";
-  if (normalized.includes("amazon nl")) return "nl";
-  return null;
-}
-
-function readStringField(row: Record<string, unknown>, names: string[]): string {
-  for (const key of names) {
-    const value = row[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-    if (typeof value === "number" && Number.isFinite(value)) return String(value).trim();
-  }
-  return "";
-}
-
-function normalizeAmazonProductUrl(rawUrl: string): string {
-  if (!rawUrl) return "";
-  const url = rawUrl.trim();
-  if (!url) return "";
-  if (!/amazon\./i.test(url)) return "";
-  return url;
-}
-
-function normalizeRef(ref: string | number | undefined): string | null {
-  const raw = String(ref ?? "")
-    .replace(/\s+/g, "")
-    .trim();
-  return raw ? raw : null;
-}
-
-export function loadAmazonLinksFromWorkbook(filePath: string): AmazonLinksByLocale {
-  const links: AmazonLinksByLocale = { fr: {}, nl: {} };
-  if (!filePath || !existsSync(filePath)) return links;
-
+function parseLinksFile(filePath: string): Record<string, string> {
+  if (!existsSync(filePath)) return {};
   try {
-    const xlsxApi = (XLSX as unknown as { default?: { readFile?: typeof XLSX.read; utils?: typeof XLSX.utils } }).default;
-    const readFile = xlsxApi?.readFile;
-    const utils = xlsxApi?.utils ?? XLSX.utils;
-    if (typeof readFile !== "function") {
-      throw new TypeError("XLSX readFile API unavailable");
+    const raw = readFileSync(filePath, "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      console.warn("[startup] Invalid Amazon links JSON (expected object):", filePath);
+      return {};
     }
-    const workbook = readFile(filePath);
-    for (const sheetName of workbook.SheetNames) {
-      const sheet = workbook.Sheets[sheetName];
-      if (!sheet) continue;
-      const rows = utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      if (rows.length === 0) continue;
-
-      const localeFromSheet = inferLocaleFromSheetName(sheetName);
-
-      for (const row of rows) {
-        const rawUrl =
-          readStringField(row, ["URL", "URLs", "url", "Lien fixe", "Lien dynamique", "Original_URL"]) ||
-          "";
-        const url = normalizeAmazonProductUrl(rawUrl);
-        if (!url) continue;
-
-        const designation = readStringField(row, ["designation", "Désignation", " Désignation Produit"]);
-        const countryRaw = readStringField(row, ["pays"]);
-        const country = normalizeCountry(countryRaw) ?? localeFromSheet;
-        if (!country) continue;
-
-        const ref = normalizeRef(
-          readStringField(row, ["ref_geb", " Code ", "SKU", "Code boutique", "CODE GEB"]) || undefined,
-        );
-
-        if (designation) {
-          links[country][normalizeText(designation)] = url;
-        }
-        if (ref) {
-          links[country][`ref_geb:${ref}`] = url;
-        }
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof key === "string" && typeof value === "string" && value.trim()) {
+        out[key] = value.trim();
       }
     }
+    return out;
   } catch (error) {
-    console.warn("[startup] Cannot parse Amazon workbook:", error);
+    console.warn("[startup] Cannot read Amazon links JSON:", filePath, error);
+    return {};
+  }
+}
+
+/** Load pre-generated Amazon product URLs from `backend/data/amazon-links.{fr,nl}.json`. */
+export function loadAmazonLinksFromJson(dataDir: string): AmazonLinksByLocale {
+  const baseDir = resolveAmazonLinksDataDir(dataDir);
+  const fr = parseLinksFile(path.join(baseDir, "amazon-links.fr.json"));
+  const nl = parseLinksFile(path.join(baseDir, "amazon-links.nl.json"));
+  const links: AmazonLinksByLocale = { fr, nl };
+
+  const frCount = Object.keys(fr).length;
+  const nlCount = Object.keys(nl).length;
+  if (frCount === 0 && nlCount === 0) {
+    console.warn(
+      `[startup] Amazon links JSON empty or missing in ${baseDir} — run: npm run convert-amazon-links --prefix backend`,
+    );
+  } else {
+    console.log("[startup] Amazon links loaded", { dataDir: baseDir, fr: frCount, nl: nlCount });
   }
 
   return links;
 }
 
+export function emptyAmazonLinks(): AmazonLinksByLocale {
+  return { fr: { ...EMPTY_LINKS.fr }, nl: { ...EMPTY_LINKS.nl } };
+}

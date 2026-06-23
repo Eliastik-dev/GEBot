@@ -15,7 +15,10 @@
     "apply-catalog-feedback": "tsx src/scripts/apply-catalog-feedback.ts",
     "scrape": "tsx src/scripts/scrape-products.ts",
     "audit-catalog-themes": "tsx src/scripts/audit-catalog-themes.ts",
-    "realign-catalog-themes": "tsx src/scripts/realign-catalog-themes.ts"
+    "realign-catalog-themes": "tsx src/scripts/realign-catalog-themes.ts",
+    "convert-amazon-links": "tsx src/scripts/convert-amazon-links-to-json.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [],
   "author": "",
@@ -35,7 +38,6 @@
     "html-to-text": "^9.0.5",
     "llamaindex": "^0.12.1",
     "pdf-parse": "^2.4.5",
-    "xlsx": "^0.18.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -46,6 +48,7 @@
     "@types/pdf-parse": "^1.1.5",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^3.2.4"
   }
 }

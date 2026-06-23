@@ -1,4 +1,4 @@
-import { loadAmazonLinksFromWorkbook } from "../amazon-links.js";
+import { loadAmazonLinksFromJson } from "../amazon-links.js";
 import { env } from "./env.js";
 import type { CacheEntry, Locale, ProductTheme } from "../types/index.js";
 
@@ -40,7 +40,7 @@ export const NEXT_QUESTION_AFTER_THEME: Record<Locale, string> = {
 
 export const RESELLER_CACHE_TTL_MS = 15 * 60 * 1000;
 export const GEO_TIMEOUT_MS = 1500;
-export const AMAZON_LINKS_BY_LOCALE = loadAmazonLinksFromWorkbook(env.AMAZON_LINKS_XLSX_PATH);
+export const AMAZON_LINKS_BY_LOCALE = loadAmazonLinksFromJson(env.AMAZON_LINKS_DATA_DIR);
 export const RESELLER_DIRECTORY_URL = "https://www.geb.fr/revendeurs";
 export const ANSWER_CACHE_VERSION = "v5_9_cited_product_format";
 

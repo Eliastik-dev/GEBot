@@ -40,6 +40,7 @@ export const feedbackBodySchema = z.object({
     .trim()
     .regex(/^\d+$/, { message: "messageId must be a numeric id" }),
   sessionId: sessionIdSchema,
+  sessionToken: z.string().trim().min(1).optional(),
   feedback: z.union([z.literal(1), z.literal(-1), z.literal(0)]),
 });
 

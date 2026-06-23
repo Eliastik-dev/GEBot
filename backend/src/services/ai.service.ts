@@ -10,7 +10,7 @@ import type { NegativeExample } from "./negative-examples.service.js";
 import { GEB_ONLY_BRAND_RULE_PROMPT } from "../utils/brand-policy.js";
 import { normalizeText } from "../utils/text.js";
 import { isRetryableMistralError, parseFallbackModels, sleep, withTimeout } from "../utils/async.js";
-import { sseWrite } from "../utils/sse.js";
+import { sseWriteWithSession } from "../utils/sse.js";
 
 export type GeoPolicyContext = {
   geoCountry: string | null;
@@ -456,11 +456,11 @@ export async function queryWithRetryAndFallback(params: {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         if (attempt > 1) {
-          sseWrite(
+          sseWriteWithSession(
             params.res,
+            params.sessionId,
             {
               status: "generating",
-              sessionId: params.sessionId,
               audience: params.audience,
               locale: params.locale,
               notice: "retrying_generation",
@@ -476,12 +476,12 @@ export async function queryWithRetryAndFallback(params: {
           "MISTRAL_QUERY",
         );
         let answer = "";
-        sseWrite(params.res, { status: "generating", sessionId: params.sessionId, audience: params.audience, locale: params.locale }, "status");
+        sseWriteWithSession(params.res, params.sessionId, { status: "generating", audience: params.audience, locale: params.locale }, "status");
         for await (const chunk of stream) {
           const delta = (chunk as { delta?: string }).delta ?? "";
           if (!delta) continue;
           answer += delta;
-          sseWrite(params.res, { delta, sessionId: params.sessionId, audience: params.audience }, "chunk");
+          sseWriteWithSession(params.res, params.sessionId, { delta, audience: params.audience }, "chunk");
         }
         return answer;
       } catch (error) {
@@ -489,11 +489,11 @@ export async function queryWithRetryAndFallback(params: {
         if (!isRetryableMistralError(error)) break;
         if (attempt >= maxRetries) break;
         const waitMs = Math.min(10_000, env.MISTRAL_CHAT_RETRY_BASE_MS * 2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
-        sseWrite(
+        sseWriteWithSession(
           params.res,
+          params.sessionId,
           {
             status: "searching",
-            sessionId: params.sessionId,
             audience: params.audience,
             locale: params.locale,
             notice: "provider_busy_retrying",

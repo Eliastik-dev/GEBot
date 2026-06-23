@@ -16,7 +16,7 @@ Copiez/éditez `backend/.env`:
 - `WP_USER`, `WP_APP_PASSWORD` (optionnel si WP public)
 - `AMAZON_STORE_URL` (optionnel, défaut `https://www.amazon.fr/stores/GEB`)
 - `AMAZON_PRODUCT_URL_MAP` (JSON produit -> URL Amazon)
-- `AMAZON_LINKS_XLSX_PATH` (optionnel, chemin du fichier `amazon_links.xlsx` FR/NL)
+- `AMAZON_LINKS_DATA_DIR` (optionnel, répertoire contenant `amazon-links.fr.json` et `amazon-links.nl.json`, défaut `backend/data`)
 - `WP_RESELLERS_ENDPOINT` (optionnel, endpoint API revendeurs WP)
 
 ### 2) Initialiser Supabase
@@ -63,7 +63,7 @@ Le backend applique:
 - boucle de clarification sur demandes vagues
 - **routage catalogue** `product_knowledge` (prioritaire) puis repli RAG vectoriel allégé
 - recommandation Amazon en priorite + liste "Find a store" (hors PL)
-- lien Amazon place en fin de reponse (avec matching automatique via `amazon_links.xlsx`)
+- lien Amazon place en fin de reponse (avec matching automatique via `backend/data/amazon-links.*.json`)
 - handoff CTA vers support Lab/Consommateurs selon profil
 - guardrails anti hors-sujet
 - journalisation des requetes dans Supabase (`chat_queries`)
@@ -93,6 +93,7 @@ npm run retrieval-regression                               # golden cases (CI)
 npm run export-feedback                                    # exporter les 👎
 npm run apply-catalog-feedback                             # suggestions tags (dry-run)
 npm run apply-catalog-feedback -- --apply                  # appliquer les tags suggérés
+npm run convert-amazon-links                               # régénérer backend/data/amazon-links.*.json depuis Excel (nécessite xlsx temporaire)
 ```
 
 Variables optionnelles dans `backend/.env` :

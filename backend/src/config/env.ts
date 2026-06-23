@@ -21,6 +21,13 @@ export const env = {
   TRUST_PROXY: process.env.TRUST_PROXY !== "false",
   /** Optional bearer for verbose /health diagnostics in production. */
   HEALTH_DETAIL_TOKEN: process.env.HEALTH_DETAIL_TOKEN ?? "",
+  /** HMAC secret for signed session tokens (required in production). */
+  SESSION_TOKEN_SECRET:
+    process.env.NODE_ENV === "production"
+      ? required("SESSION_TOKEN_SECRET")
+      : (process.env.SESSION_TOKEN_SECRET ?? "dev-insecure-session-token-secret"),
+  /** Lifetime of issued session tokens (default 24h). */
+  SESSION_TOKEN_TTL_MS: Number(process.env.SESSION_TOKEN_TTL_MS ?? String(24 * 60 * 60 * 1000)),
   MISTRAL_API_KEY: required("MISTRAL_API_KEY"),
   MISTRAL_EMBED_BATCH_SIZE: Number(process.env.MISTRAL_EMBED_BATCH_SIZE ?? "32"),
   /** Pause between embedding HTTP calls (ms). Helps stay under Mistral req/min on free tier (~60). */
@@ -52,8 +59,8 @@ export const env = {
   MISTRAL_CHAT_RETRY_BASE_MS: Number(process.env.MISTRAL_CHAT_RETRY_BASE_MS ?? "1500"),
   AMAZON_STORE_URL: process.env.AMAZON_STORE_URL ?? "https://www.amazon.fr/s?k=GEB",
   AMAZON_PRODUCT_URL_MAP: process.env.AMAZON_PRODUCT_URL_MAP ?? "",
-  AMAZON_LINKS_XLSX_PATH:
-    process.env.AMAZON_LINKS_XLSX_PATH ?? "P:\\Ecommerce\\Liens produits GEB toutes plateformes.xlsx",
+  /** Directory containing amazon-links.fr.json and amazon-links.nl.json (default: backend/data). */
+  AMAZON_LINKS_DATA_DIR: process.env.AMAZON_LINKS_DATA_DIR ?? "",
   WP_RESELLERS_ENDPOINT: process.env.WP_RESELLERS_ENDPOINT ?? "/wp-json/wp/v2/resellers",
   /** Max structured products injected when product_knowledge route matches. */
   PRODUCT_KNOWLEDGE_MAX_PRODUCTS: Number(process.env.PRODUCT_KNOWLEDGE_MAX_PRODUCTS ?? "3"),

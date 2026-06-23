@@ -35,6 +35,7 @@ type ChatStreamPayload = {
   done?: boolean;
   error?: string;
   sessionId?: string;
+  sessionToken?: string;
   audience?: Audience;
   theme?: Exclude<ProductTheme, null>;
   showThemeReplies?: boolean;
@@ -138,6 +139,17 @@ function getOrCreateSessionId(): string {
   return next;
 }
 
+function getStoredSessionToken(): string {
+  return window.localStorage.getItem("gebot_session_token") ?? "";
+}
+
+function persistSessionAuth(sessionId: string, sessionToken?: string | null): void {
+  window.localStorage.setItem("gebot_session_id", sessionId);
+  if (sessionToken) {
+    window.localStorage.setItem("gebot_session_token", sessionToken);
+  }
+}
+
 function detectLocale(): Locale {
   const raw = (document.documentElement.lang || "").toLowerCase();
   if (raw.startsWith("en")) return "en";
@@ -157,13 +169,19 @@ function getStoredGeoCountry(): string | null {
   return raw && raw.trim() ? raw : null;
 }
 
-async function fetchGeoCountry(apiBaseUrl: string, sessionId: string, locale: Locale): Promise<string | null> {
+async function fetchGeoCountry(
+  apiBaseUrl: string,
+  sessionId: string,
+  locale: Locale,
+  onSessionToken?: (token: string) => void,
+): Promise<string | null> {
   const endpoint = `${apiBaseUrl.replace(/\/$/, "")}/api/geolocation?sessionId=${encodeURIComponent(sessionId)}&locale=${encodeURIComponent(locale)}`;
   const response = await fetch(endpoint, {
     headers: { "x-session-id": sessionId, Accept: "application/json" },
   });
   if (!response.ok) return null;
-  const payload = (await response.json()) as { countryCode?: string | null };
+  const payload = (await response.json()) as { countryCode?: string | null; sessionToken?: string };
+  if (payload.sessionToken) onSessionToken?.(payload.sessionToken);
   return typeof payload.countryCode === "string" ? payload.countryCode : null;
 }
 
@@ -171,6 +189,7 @@ export function Widget({ apiBaseUrl }: Props) {
   const { t } = useTranslation();
   const [locale, setLocale] = useState<Locale>(() => detectLocale());
   const [sessionId, setSessionId] = useState<string>(() => getOrCreateSessionId());
+  const [sessionToken, setSessionToken] = useState<string>(() => getStoredSessionToken());
   const [open, setOpen] = useState(false);
   const [audience, setAudience] = useState<Audience>(null);
   const [theme, setTheme] = useState<ProductTheme>(null);
@@ -280,8 +299,17 @@ export function Widget({ apiBaseUrl }: Props) {
     try {
       await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/feedback`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messageId: msg.messageId, sessionId, feedback }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Session-Id": sessionId,
+          ...(sessionToken ? { "X-Session-Token": sessionToken } : {}),
+        },
+        body: JSON.stringify({
+          messageId: msg.messageId,
+          sessionId,
+          feedback,
+          ...(sessionToken ? { sessionToken } : {}),
+        }),
       });
     } catch {
       /* best-effort */
@@ -333,7 +361,17 @@ export function Widget({ apiBaseUrl }: Props) {
           if (meta.status) setBackendStatus(meta.status);
           if (meta.sessionId && meta.sessionId !== sessionId) {
             setSessionId(meta.sessionId);
-            window.localStorage.setItem("gebot_session_id", meta.sessionId);
+            if (meta.sessionToken) {
+              setSessionToken(meta.sessionToken);
+              persistSessionAuth(meta.sessionId, meta.sessionToken);
+            } else {
+              setSessionToken("");
+              window.localStorage.removeItem("gebot_session_token");
+              window.localStorage.setItem("gebot_session_id", meta.sessionId);
+            }
+          } else if (meta.sessionToken) {
+            setSessionToken(meta.sessionToken);
+            persistSessionAuth(sessionId, meta.sessionToken);
           }
           if (meta.audience) {
             setAudience(meta.audience);
@@ -434,7 +472,10 @@ export function Widget({ apiBaseUrl }: Props) {
       return;
     }
     try {
-      const country = await fetchGeoCountry(apiBaseUrl, sessionId, locale);
+      const country = await fetchGeoCountry(apiBaseUrl, sessionId, locale, (token) => {
+        setSessionToken(token);
+        persistSessionAuth(sessionId, token);
+      });
       setGeoCountry(country);
       if (country) {
         window.localStorage.setItem("gebot_geo_country", country);
