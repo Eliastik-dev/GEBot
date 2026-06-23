@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadAmazonLinksFromJson, resolveAmazonLinksDataDir } from "./amazon-links.js";
+import { loadAmazonLinksFromJson, resolveAmazonLinksDataDir } from "./modules/commerce/amazon-links.js";
 
 const tempDirs: string[] = [];
 

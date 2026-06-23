@@ -3,7 +3,7 @@
  */
 
 import { supabase } from "../config/supabase.js";
-import type { ExtractedMetadata } from "../intent-extractor.js";
+import type { ExtractedMetadata } from "../modules/retrieval/intent-extractor.js";
 import type { ResponseContextSnapshot } from "../types/retrieval-feedback.js";
 import { extractRecommendedProduct } from "../utils/amazon.js";
 import { fireAndForget } from "../utils/async.js";

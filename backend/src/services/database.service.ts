@@ -1,7 +1,7 @@
 import { env } from "../config/env.js";
 import { supabase } from "../config/supabase.js";
 import type { Audience, Locale, ProductTheme, StoredMessage, ChatRole, ResponseContextSnapshot } from "../types/index.js";
-import type { ExtractedMetadata } from "../intent-extractor.js";
+import type { ExtractedMetadata } from "../modules/retrieval/intent-extractor.js";
 import { VALID_THEMES } from "../config/constants.js";
 
 export async function ensureSession(

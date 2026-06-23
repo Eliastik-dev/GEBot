@@ -6,7 +6,7 @@
  * structured JSON. A lightweight regex fallback is kept only for critical safety keywords.
  */
 
-import { env } from "./env.js";
+import { env } from "../../env.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ import {
   asksMetalThreadPasteJoint,
   jointServiceFluidStatedInText,
   parseJointServiceFluid,
-} from "./utils/joint-paste.js";
+} from "../../utils/joint-paste.js";
 import {
   hasDescalingContext,
   hasHeatingCircuitContext,
@@ -78,8 +78,8 @@ import {
   isBuildingSurfaceSealingContext,
   isPersonalDrinkwareOutOfCatalog,
   isSanitaryFixtureSealingContext,
-} from "./utils/diagnostic-rules.js";
-import { mentionsLikelyProductPhrase } from "./utils/product-mention.js";
+} from "../../utils/diagnostic-rules.js";
+import { mentionsLikelyProductPhrase } from "../../utils/product-mention.js";
 
 function normalizeExtractionText(value: string): string {
   return value

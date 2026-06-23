@@ -6,9 +6,9 @@
  * Results are persisted to Supabase for building a training dataset.
  */
 
-import { env } from "./env.js";
-import { supabase } from "./supabase.js";
-import type { ExtractedMetadata } from "./intent-extractor.js";
+import { env } from "../../env.js";
+import { supabase } from "../../supabase.js";
+import type { ExtractedMetadata } from "../retrieval/intent-extractor.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

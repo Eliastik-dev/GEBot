@@ -9,7 +9,7 @@ const EMPTY_LINKS: AmazonLinksByLocale = { fr: {}, nl: {} };
 
 /** Resolve backend package root (works from src/ and dist/). */
 export function resolveBackendRoot(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 }
 
 export function resolveAmazonLinksDataDir(configured: string): string {

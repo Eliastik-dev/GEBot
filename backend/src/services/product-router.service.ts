@@ -4,7 +4,7 @@
 
 import {
   isAutomotiveExhaustContext,
-} from "../dynamic-reranker.js";
+} from "../modules/retrieval/dynamic-reranker.js";
 import {
   isPersonalDrinkwareOutOfCatalog,
   isPiscineInaccessiblePipeLeak,
@@ -13,7 +13,7 @@ import {
   isSanitaryFixtureSealingContext,
   isWoodStoveCosmeticCareContext,
 } from "../utils/diagnostic-rules.js";
-import type { ExtractedMetadata } from "../intent-extractor.js";
+import type { ExtractedMetadata } from "../modules/retrieval/intent-extractor.js";
 import type { Audience, Locale, ProductTheme } from "../types/index.js";
 import type { ProductKnowledgeRow } from "../types/product-knowledge.js";
 import {

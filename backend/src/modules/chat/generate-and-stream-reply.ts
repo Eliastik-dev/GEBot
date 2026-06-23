@@ -1,7 +1,6 @@
-// @ts-nocheck
-﻿import type { Request, Response } from "express";
-import { buildEnrichedSearchQuery, dynamicRerank, hasExhaustProductInNodes, isAutomotiveExhaustContext } from "../../dynamic-reranker.js";
-import { runDiagnosticAnalysis, type DiagnosticAnalysis } from "../../intent-extractor.js";
+import type { Request, Response } from "express";
+import { buildEnrichedSearchQuery, dynamicRerank, hasExhaustProductInNodes, isAutomotiveExhaustContext } from "../retrieval/dynamic-reranker.js";
+import { runDiagnosticAnalysis, type DiagnosticAnalysis } from "../retrieval/intent-extractor.js";
 import { ANSWER_CACHE_VERSION, answerCache, NEXT_QUESTION_AFTER_THEME, ONBOARDING_QUESTION_BY_LOCALE, THEME_QUESTION_BY_LOCALE, TTFT_TARGET_MS, VALID_THEMES, VECTOR_SEARCH_TIMEOUT_MS } from "../../config/constants.js";
 import { env } from "../../config/env.js";
 import { resolveVectorRagLite } from "../../config/retrieval.js";
@@ -95,9 +94,11 @@ import type { chatBodySchema } from "../../validation/schemas.js";
 import type { VectorStoreIndex } from "llamaindex";
 import type { z } from "zod";
 import type { ChatPipelineBindings } from "./chat-pipeline-bindings.js";
+import { assertAfterRetrieval } from "./chat-pipeline-assertions.js";
 
 export async function generateAndStreamReply(ctx: ChatPipelineBindings): Promise<void> {
   if (ctx.completed) return;
+  assertAfterRetrieval(ctx);
   const { req, res, deps, startedAt, body, message, locale, profileFromMetadata, sessionId, geoConsentFromBody, geoCountryFromBody } = ctx;
 
     ctx.directSheetProduct = 
@@ -176,6 +177,7 @@ export async function generateAndStreamReply(ctx: ChatPipelineBindings): Promise
         sseWriteWithSession(res, sessionId, { done: true, sessionId, audience: ctx.audience }, "done");
         res.end();
       }
+      ctx.completed = true;
       return;
     }
     }

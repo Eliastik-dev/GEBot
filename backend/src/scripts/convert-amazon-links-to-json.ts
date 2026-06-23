@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as XLSX from "xlsx";
-import type { AmazonLinksByLocale } from "../amazon-links.js";
+import type { AmazonLinksByLocale } from "../modules/commerce/amazon-links.js";
 
 type AmazonLocale = "fr" | "nl";
 

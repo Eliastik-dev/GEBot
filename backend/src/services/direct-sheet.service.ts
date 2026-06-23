@@ -1,5 +1,5 @@
 import type { Response } from "express";
-import type { ExtractedMetadata } from "../intent-extractor.js";
+import type { ExtractedMetadata } from "../modules/retrieval/intent-extractor.js";
 import { answerCache } from "../config/constants.js";
 import { env } from "../config/env.js";
 import type { Audience, HandoffPayload, Locale, ProductTheme, Reseller } from "../types/index.js";

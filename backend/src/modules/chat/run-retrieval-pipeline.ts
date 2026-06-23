@@ -1,7 +1,6 @@
-// @ts-nocheck
-﻿import type { Request, Response } from "express";
-import { buildEnrichedSearchQuery, dynamicRerank, hasExhaustProductInNodes, isAutomotiveExhaustContext } from "../../dynamic-reranker.js";
-import { runDiagnosticAnalysis, type DiagnosticAnalysis } from "../../intent-extractor.js";
+import type { Request, Response } from "express";
+import { buildEnrichedSearchQuery, dynamicRerank, hasExhaustProductInNodes, isAutomotiveExhaustContext } from "../retrieval/dynamic-reranker.js";
+import { runDiagnosticAnalysis, type DiagnosticAnalysis } from "../retrieval/intent-extractor.js";
 import { ANSWER_CACHE_VERSION, answerCache, NEXT_QUESTION_AFTER_THEME, ONBOARDING_QUESTION_BY_LOCALE, THEME_QUESTION_BY_LOCALE, TTFT_TARGET_MS, VALID_THEMES, VECTOR_SEARCH_TIMEOUT_MS } from "../../config/constants.js";
 import { env } from "../../config/env.js";
 import { resolveVectorRagLite } from "../../config/retrieval.js";
@@ -95,10 +94,12 @@ import type { chatBodySchema } from "../../validation/schemas.js";
 import type { VectorStoreIndex } from "llamaindex";
 import type { z } from "zod";
 import type { ChatPipelineBindings } from "./chat-pipeline-bindings.js";
+import { assertAfterSessionContext } from "./chat-pipeline-assertions.js";
 import { buildAnswerCacheKey, filterRetrievalNodesByFeedbackPenalties } from "./chat-helpers.js";
 
 export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<void> {
   if (ctx.completed) return;
+  assertAfterSessionContext(ctx);
   const { req, res, deps, startedAt, body, message, locale, profileFromMetadata, sessionId, geoConsentFromBody, geoCountryFromBody } = ctx;
 
     // ÔöÇÔöÇ ML-based Intent & Metadata Extraction (replaces legacy regex gates) ÔöÇÔöÇ
@@ -110,6 +111,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       locale,
       message,
     );
+    ctx.diagnosticResult = diagnosticResult;
     ctx.extractedMeta = { ...diagnosticResult.metadata };
     if (ctx.jointPasteContext) {
       ctx.extractedMeta.fluid = ctx.jointPasteContext.parsedFluid.metadataFluid;
@@ -121,10 +123,11 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
         /desembou|inhibiteur|\bg3\b|g70|embouage|radiateur|collafeu|gebsoplast|colle\s+pvc|detecteur|debouch/i;
       ctx.extractedMeta.synonyms = ctx.extractedMeta.synonyms.filter((s) => !pollutantSynonym.test(s));
     }
-    ctx.descalingPollutant = 
+    const descalingPollutant =
       /fuite|colmat|patch|reparation_fuite|collafeu|propfeu|tresse|desembou|embouage|inhibiteur|\bg3\b/i;
+    ctx.descalingPollutant = descalingPollutant;
     if (hasDescalingContext(`${ctx.preAnalysisTranscript}\n${message}`)) {
-      ctx.extractedMeta.synonyms = ctx.extractedMeta.synonyms.filter((s) => !ctx.descalingPollutant.test(s));
+      ctx.extractedMeta.synonyms = ctx.extractedMeta.synonyms.filter((s) => !descalingPollutant.test(s));
     }
     console.log("[/api/chat] intent_extraction", {
       sessionId,
@@ -140,7 +143,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       ctx.extractedMeta.needs_clarification &&
       (isBuildingSurfaceSealingContext(ctx.conversationFull) || isBuildingEnvelopeLeakContext(ctx.conversationFull)) &&
       ctx.extractedMeta.missing_params.every((p) =>
-        ["ctx.fluid", "joint_service_fluid"].includes(p),
+        ["fluid", "joint_service_fluid"].includes(p),
       )
     ) {
       ctx.extractedMeta.needs_clarification = false;
@@ -159,7 +162,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
     if (
       ctx.extractedMeta.needs_clarification &&
       hasHeatingCircuitContext(ctx.conversationFull) &&
-      ctx.extractedMeta.missing_params.every((p) => p === "joint_service_fluid" || p === "ctx.fluid")
+      ctx.extractedMeta.missing_params.every((p) => p === "joint_service_fluid" || p === "fluid")
     ) {
       ctx.extractedMeta.needs_clarification = false;
       ctx.extractedMeta.missing_params = [];
@@ -286,7 +289,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       if (informationalQuestion) {
         ctx.extractedMeta.needs_clarification = false;
         ctx.extractedMeta.missing_params = ctx.extractedMeta.missing_params.filter(
-          (p) => !["ctx.fluid", "diameter", "pressure", "joint_service_fluid"].includes(p),
+          (p) => !["fluid", "diameter", "pressure", "joint_service_fluid"].includes(p),
         );
         if (ctx.extractedMeta.missing_params.length === 0) {
           ctx.extractedMeta.needs_clarification = false;
@@ -349,7 +352,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       isInformationalProductQuestion(ctx.queryForRetrieval) ||
       isInformationalProductQuestion(message) ||
       isInformationalProductQuestion(ctx.effectiveQuery);
-    let faqContextNodes: unknown[] = [];
+    ctx.faqContextNodes = [];
 
     ctx.ongoingConversationEarly = hasOngoingConversation(ctx.historyMessages);
     ctx.feedbackCorrection = resolveAnyProductCorrectionContext(ctx.historyMessages, message);
@@ -404,6 +407,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
           logStatus: "direct_cited_product",
           sessionTheme: ctx.effectiveTheme,
         });
+        ctx.completed = true;
         return;
       }
     }
@@ -444,6 +448,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
           ongoingConversation: ctx.ongoingConversationEarly,
           sessionTheme: ctx.effectiveTheme,
         });
+        ctx.completed = true;
         return;
       }
     }
@@ -497,6 +502,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
           logStatus: "direct_cited_product",
           sessionTheme: ctx.effectiveTheme,
         });
+        ctx.completed = true;
         return;
       }
     }
@@ -553,14 +559,18 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
 
     ctx.pkLocale = ctx.pkLocaleEarly;
     ctx.catalogSize = ctx.catalogSizeEarly;
-    let resolvedNodes: unknown[] = [];
-    ctx.retrievalPath = "vector_rag" as "product_knowledge" | "vector_rag";
+    ctx.retrievalPath = "vector_rag";
     ctx.retrievalCount = 0;
     ctx.preTechnicalFilterCount = 0;
-    let pkRouteTags: string[] = [];
-    let pkProductSlugs: string[] = [];
+    ctx.pkProductSlugs = [];
+    ctx.pkRouteTags = [];
+    ctx.resolvedNodes = [];
     ctx.pkResolvedProducts = [...ctx.catalogCitation.products] as ProductKnowledgeRow[];
-    ctx.pkRenderContext = { sessionAudience: ctx.audience, sessionTheme: ctx.effectiveTheme, locale };
+    ctx.pkRenderContext = {
+      sessionAudience: ctx.audience,
+      sessionTheme: ctx.effectiveTheme,
+      locale,
+    };
 
     ctx.feedbackQuery = 
       ctx.productFollowUp || ctx.purchaseFollowUp
@@ -631,8 +641,10 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       ctx.feedbackHardBoosts,
     );
     ctx.cached = answerCache.get(ctx.cacheKey);
-    ctx.cachedContainsDeprecatedStoreLink = 
-      ctx.cached?.value.includes("amazon.fr/stores/") || ctx.cached?.value.includes("amazon.nl/stores/");
+    ctx.cachedContainsDeprecatedStoreLink =
+      Boolean(
+        ctx.cached?.value.includes("amazon.fr/stores/") || ctx.cached?.value.includes("amazon.nl/stores/"),
+      );
     if (ctx.cached && ctx.cached.expiresAt > Date.now() && !ctx.cachedContainsDeprecatedStoreLink) {
       const recommendation = resolveAmazonRecommendation(ctx.cached.value, locale);
       const productType = await classifyProblemTypeWithLlm(ctx.searchQuery, locale);
@@ -915,7 +927,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       try {
         const pdfNodes = await retrievePdfChunksForSlugs(deps.index, ctx.pdfSupplementSlugs, ctx.pkLocale, {
           materialKeyword: ctx.extractedMeta.material,
-          queryText: ctx.factualProductMode ? citationScanText : ctx.searchQuery,
+          queryText: ctx.factualProductMode ? ctx.citationScanText : ctx.searchQuery,
         });
         if (pdfNodes.length > 0) {
           ctx.resolvedNodes = mergeRetrievalNodes(ctx.resolvedNodes, pdfNodes);

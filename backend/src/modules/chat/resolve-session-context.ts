@@ -1,7 +1,6 @@
-// @ts-nocheck
-﻿import type { Request, Response } from "express";
-import { buildEnrichedSearchQuery, dynamicRerank, hasExhaustProductInNodes, isAutomotiveExhaustContext } from "../../dynamic-reranker.js";
-import { runDiagnosticAnalysis, type DiagnosticAnalysis } from "../../intent-extractor.js";
+import type { Request, Response } from "express";
+import { buildEnrichedSearchQuery, dynamicRerank, hasExhaustProductInNodes, isAutomotiveExhaustContext } from "../retrieval/dynamic-reranker.js";
+import { runDiagnosticAnalysis, type DiagnosticAnalysis } from "../retrieval/intent-extractor.js";
 import { ANSWER_CACHE_VERSION, answerCache, NEXT_QUESTION_AFTER_THEME, ONBOARDING_QUESTION_BY_LOCALE, THEME_QUESTION_BY_LOCALE, TTFT_TARGET_MS, VALID_THEMES, VECTOR_SEARCH_TIMEOUT_MS } from "../../config/constants.js";
 import { env } from "../../config/env.js";
 import { resolveVectorRagLite } from "../../config/retrieval.js";
@@ -188,10 +187,12 @@ export async function resolveSessionContext(ctx: ChatPipelineBindings): Promise<
 
     ctx.sessionDiscussedProduct = getLastDiscussedProductFromHistory(ctx.historyMessages);
     ctx.sessionDiscussedSlug = getLastDiscussedProductSlugFromHistory(ctx.historyMessages);
-    ctx.purchaseFollowUp = 
-      hasOngoingConversation(ctx.historyMessages) &&
-      ctx.sessionDiscussedProduct &&
-      isPurchaseAvailabilityQuestion(message);
+    ctx.purchaseFollowUp =
+      Boolean(
+        hasOngoingConversation(ctx.historyMessages) &&
+          ctx.sessionDiscussedProduct &&
+          isPurchaseAvailabilityQuestion(message),
+      );
 
     if (ctx.purchaseFollowUp) {
       const pkLocalePurchase = productKnowledgeLocale(locale);

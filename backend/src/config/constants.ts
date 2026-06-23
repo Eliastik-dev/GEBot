@@ -1,4 +1,4 @@
-import { loadAmazonLinksFromJson } from "../amazon-links.js";
+import { loadAmazonLinksFromJson } from "../modules/commerce/amazon-links.js";
 import { env } from "./env.js";
 import type { CacheEntry, Locale, ProductTheme } from "../types/index.js";
 

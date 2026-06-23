@@ -6,8 +6,8 @@
  */
 
 import type { ExtractedMetadata, Intent } from "./intent-extractor.js";
-import type { ProductTheme } from "./types/index.js";
-import { isSanitaryFixtureSealingContext } from "./utils/diagnostic-rules.js";
+import type { ProductTheme } from "../../types/index.js";
+import { isSanitaryFixtureSealingContext } from "../../utils/diagnostic-rules.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
