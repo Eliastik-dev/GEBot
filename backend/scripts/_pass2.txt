@@ -1,0 +1,5 @@
+    if (!inObject) {
+      l = l.replace(/^(\s+)(\w+): ctx\.\2\s*,?\s*$/, "$1ctx.$2,");
+      l = l.replace(/, (\w+): ctx\.\1\b/g, ", ctx.$1");
+      l = l.replace(/\((\w+): ctx\.\1\b/g, "(ctx.$1");
+    }

@@ -1,0 +1,19 @@
+function fixKnownNamedCallBlocks(text) {
+  text = text.replace(
+    /\n(\s+)queryForRetrieval: ctx\.queryForRetrieval,\n\1effectiveTheme: ctx\.effectiveTheme,/g,
+    "\n$1ctx.queryForRetrieval,\n$1ctx.effectiveTheme,",
+  );
+  text = text.replace(
+    /\n(\s+)pkResolvedProducts: ctx\.pkResolvedProducts,\n\1feedbackHardBoosts: ctx\.feedbackHardBoosts,\n\1pkLocale: ctx\.pkLocale,/g,
+    "\n$1ctx.pkResolvedProducts,\n$1ctx.feedbackHardBoosts,\n$1ctx.pkLocale,",
+  );
+  text = text.replace(
+    /resolvedNodes = dynamicRerank\(\n(\s+)resolvedNodes,\n\1queryForRetrieval: ctx\.queryForRetrieval,\n\1searchQuery: ctx\.searchQuery,\n\1extractedMeta: ctx\.extractedMeta,\n\1effectiveTheme: ctx\.effectiveTheme,/g,
+    "resolvedNodes = dynamicRerank(\n$1resolvedNodes,\n$1ctx.queryForRetrieval,\n$1ctx.searchQuery,\n$1ctx.extractedMeta,\n$1ctx.effectiveTheme,",
+  );
+  text = text.replace(
+    /filterRetrievalNodesByFeedbackPenalties\(\n(\s+)resolvedNodes,\n\1ctx\.feedbackCtx\.penalizeSlugs,\n\1feedbackHardPenalties: ctx\.feedbackHardPenalties,/g,
+    "filterRetrievalNodesByFeedbackPenalties(\n$1resolvedNodes,\n$1ctx.feedbackCtx.penalizeSlugs,\n$1ctx.feedbackHardPenalties,",
+  );
+  return text;
+}
