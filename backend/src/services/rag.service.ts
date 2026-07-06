@@ -4,6 +4,12 @@ import { env } from "../config/env.js";
 import { RESELLER_CACHE_TTL_MS, RESELLER_DIRECTORY_URL, VECTOR_SEARCH_TIMEOUT_MS } from "../config/constants.js";
 import type { Locale, ProductTheme, Reseller, StoredMessage } from "../types/index.js";
 import { hasDescalingContext, hasHeatingCircuitContext, hasInaccessibleThreadedJointForResinContext, isJointSealingAssemblyWithoutLeak, isPersonalDrinkwareOutOfCatalog, isPurePipeLeakDamageTurn, isSanitaryFixtureSealingContext, isThinRetrievalQuery, userTurnRelevantToLeakRepairThread, hasObviousLeakOrPipeDamageIntent, isThreadedJointOrLiquidSealingTopic } from "../utils/diagnostic-rules.js";
+import {
+  hasHydraulicPressureIssueContext,
+  hasNegatedLeakInText,
+  isGasHeatingEquipmentContext,
+  isHydraulicEcsDiagnosticContext,
+} from "../utils/fluid-context.js";
 import { isProfileOnlyMessage, isThemeOnlyMessage } from "../utils/locale.js";
 import { mentionsLikelyProductPhrase } from "../utils/product-mention.js";
 import { isInformationalProductQuestion, normalizeText } from "../utils/text.js";
@@ -70,6 +76,9 @@ export function buildSearchQuery(baseQuestion: string, fluid: string | null): st
   const isPipePlumbingContext = /\b(tuyau|tube|canalisation|pipe|pvc|cuivre|pehd|raccord|conduit|plomb|evacuation|egout)\b/.test(normalized);
   const isBuildingSurfaceContext = /\b(carrelage|terrasse|mur|facade|sol|dalle|beton|pierre|brique|toiture|toit)\b/.test(normalized);
   if (isPersonalDrinkwareOutOfCatalog(baseQuestion)) {
+    return baseQuestion;
+  }
+  if (isHydraulicEcsDiagnosticContext(baseQuestion) && !/\b(fuite|leak|infiltration)\b/i.test(normalized)) {
     return baseQuestion;
   }
   if (PROBLEM_LEXEME_RE.test(baseQuestion) && isPipePlumbingContext && !isBuildingSurfaceContext) {
@@ -166,6 +175,9 @@ const THEME_SEARCH_EXPANSIONS: Record<ProductTheme, Array<{ pattern: RegExp; ter
 
 
 export function buildThemeAwareSearchQuery(baseQuestion: string, theme: ProductTheme): string {
+  if (isHydraulicEcsDiagnosticContext(baseQuestion)) {
+    return baseQuestion;
+  }
   if (isSanitaryFixtureSealingContext(baseQuestion)) {
     return `${baseQuestion} silicone mastic sanitaire joint sanitaire`.trim();
   }
@@ -187,12 +199,20 @@ export function buildThemeAwareSearchQuery(baseQuestion: string, theme: ProductT
 /** Short or dimension-only follow-ups (e.g. "100mm") must not be the sole vector query — merge recent user turns. */
 
 export function enrichRetrievalQuery(effectiveQuery: string, historyMessages: StoredMessage[], currentMessage: string): string {
-  if (mentionsLikelyProductPhrase(currentMessage)) return effectiveQuery.trim();
-  if (!isThinRetrievalQuery(effectiveQuery)) return effectiveQuery;
+  const thinQuery = isThinRetrievalQuery(effectiveQuery);
   const userTurns = historyMessages
     .filter((m) => m.role === "user" && !isProfileOnlyMessage(m.content) && !isThemeOnlyMessage(m.content) && m.content.trim().length > 6)
     .slice(-6)
     .map((m) => m.content.trim());
+
+  const sessionHydraulicEcsEarly =
+    isHydraulicEcsDiagnosticContext(currentMessage) ||
+    isHydraulicEcsDiagnosticContext(effectiveQuery) ||
+    userTurns.some((t) => isHydraulicEcsDiagnosticContext(t));
+  if (mentionsLikelyProductPhrase(currentMessage) && !(thinQuery && sessionHydraulicEcsEarly)) {
+    return effectiveQuery.trim();
+  }
+  if (!thinQuery) return effectiveQuery;
 
   const currentLeak = hasObviousLeakOrPipeDamageIntent(currentMessage);
   const effectiveLeak = hasObviousLeakOrPipeDamageIntent(effectiveQuery);
@@ -210,6 +230,16 @@ export function enrichRetrievalQuery(effectiveQuery: string, historyMessages: St
     userTurns.some((t) => hasHeatingCircuitContext(t));
   const heatingCircuitFocus =
     sessionHeatingCircuit && !currentLeak && !effectiveLeak && !threadedSealingFocus && !descalingFocus;
+  const leakNegated =
+    hasNegatedLeakInText(currentMessage) ||
+    hasNegatedLeakInText(effectiveQuery) ||
+    userTurns.some((t) => hasNegatedLeakInText(t));
+  const sessionHydraulicEcs =
+    isHydraulicEcsDiagnosticContext(currentMessage) ||
+    isHydraulicEcsDiagnosticContext(effectiveQuery) ||
+    userTurns.some((t) => isHydraulicEcsDiagnosticContext(t));
+  const hydraulicEcsFocus =
+    sessionHydraulicEcs && !currentLeak && !effectiveLeak && !threadedSealingFocus && !descalingFocus;
 
   let turnsToMerge: string[];
   if (descalingFocus) {
@@ -223,14 +253,26 @@ export function enrichRetrievalQuery(effectiveQuery: string, historyMessages: St
     turnsToMerge = userTurns.filter(
       (t) =>
         hasHeatingCircuitContext(t) ||
+        isGasHeatingEquipmentContext(t) ||
+        hasHydraulicPressureIssueContext(t) ||
         /\b(g110|g10|g3|g70|inhibiteur|universel|plancher\s+chauffant|desembou)\b/i.test(t) ||
+        (!hasObviousLeakOrPipeDamageIntent(t) && isThinRetrievalQuery(t)),
+    );
+  } else if (hydraulicEcsFocus) {
+    turnsToMerge = userTurns.filter(
+      (t) =>
+        isHydraulicEcsDiagnosticContext(t) ||
+        hasHydraulicPressureIssueContext(t) ||
+        isGasHeatingEquipmentContext(t) ||
+        /\b(chaudiere|ecs|odeur|robinet|sanitaire|eau\s+chaude)\b/i.test(normalizeText(t)) ||
         (!hasObviousLeakOrPipeDamageIntent(t) && isThinRetrievalQuery(t)),
     );
   } else if (threadedSealingFocus) {
     turnsToMerge = userTurns.filter((t) => !isPurePipeLeakDamageTurn(t));
   } else {
     const sessionInLeakThread =
-      currentLeak || effectiveLeak || userTurns.some((t) => hasObviousLeakOrPipeDamageIntent(t));
+      !leakNegated &&
+      (currentLeak || effectiveLeak || userTurns.some((t) => hasObviousLeakOrPipeDamageIntent(t)));
     turnsToMerge = sessionInLeakThread
       ? userTurns.filter((t) => userTurnRelevantToLeakRepairThread(t))
       : userTurns;

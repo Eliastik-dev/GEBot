@@ -30,6 +30,7 @@ import {
   AUTOMOTIVE_EXHAUST_SUPPLEMENT_QUERY,
 } from "../../services/rag.service.js";
 import { hasDescalingContext, hasHeatingCircuitContext, isBuildingEnvelopeLeakContext, isBuildingSurfaceSealingContext, isPersonalDrinkwareOutOfCatalog } from "../../utils/diagnostic-rules.js";
+import { isHydraulicEcsDiagnosticContext } from "../../utils/fluid-context.js";
 import {
   countProductKnowledge,
   detectCatalogProductCitations,
@@ -52,7 +53,7 @@ import {
 import type { Audience, ChatRequestBody, Locale, ProductTheme, Reseller } from "../../types/index.js";
 import type { ProductKnowledgeRow } from "../../types/product-knowledge.js";
 import { fireAndForget, withTimeout } from "../../utils/async.js";
-import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection } from "../../utils/amazon.js";
+import { getAmazonDefaultUrl, getProductHintFromNodes, getProductSlugHintFromNodes, resolveAmazonRecommendation, extractRecommendedProduct, hasAmazonSection, hasFallbackAmazonSearchUrl, hasValidRecommendedProduct, removeAmazonSections, buildAmazonSection, shouldInjectAmazonSection } from "../../utils/amazon.js";
 import { resolveAnyProductCorrectionContext, resolveProductCitationQuery, buildUserCitationScanText } from "../../utils/feedback-correction.js";
 import { detectAudience, detectTheme, getSpecificClarification, isProfileOnlyMessage, isThemeOnlyMessage, isThemeUncertaintyMessage, buildThemeUncertaintyReply, normalizeAudience, normalizeLocale } from "../../utils/locale.js";
 import { answerProvidesProductGuidance, answerContradictsRecommendation, buildComplementaryFollowUp, buildComplementarySuggestion, buildDirectCitedProductReply, buildDirectTechnicalSheetReply, buildEscalationSection, buildGratitudeReply, buildHandoff, buildPurchaseAvailabilityIntro, buildResellerSection, buildMoreDetailsForProductRequest, buildPersonalDrinkwareOutOfScopeReply, compactProductFollowUpAnswer, containsOffTopicSink, extractComplementaryQuestionBlock, isComplementaryQuestion, isGratitudeOrClosingMessage, isResellerIntent, isYesNoAnswer, removeComplementaryQuestionBlocks, sanitizeDocumentationLinks, buildPipeGasClarification, hasStoreSection, stripAnswerWithoutProductRecommendation, stripContradictoryProductRecommendation, stripLeadingConversationGreeting } from "../../utils/response/index.js";
@@ -224,11 +225,17 @@ export async function generateAndStreamReply(ctx: ChatPipelineBindings): Promise
 
     if (!ctx.validProductRecommended) {
       const stripped = stripAnswerWithoutProductRecommendation(removeAmazonSections(ctx.answer));
+      const conversationContext = `${ctx.queryForRetrieval}\n${message}`.trim();
+      const ecsDiagnostic = isHydraulicEcsDiagnosticContext(conversationContext);
       const moreDetails =
         ctx.productFollowUp || answerProvidesProductGuidance(ctx.answer)
           ? ""
-          : buildMoreDetailsForProductRequest(locale, ctx.audience, message);
-      ctx.answer = [stripped, moreDetails].filter(Boolean).join("\n\n");
+          : buildMoreDetailsForProductRequest(locale, ctx.audience, conversationContext);
+      const escalation =
+        !answerProvidesProductGuidance(ctx.answer) && (ctx.audience === "particulier" || ecsDiagnostic)
+          ? buildEscalationSection(locale, ctx.audience)
+          : "";
+      ctx.answer = [stripped, moreDetails, escalation].filter(Boolean).join("\n\n");
       sseWriteWithSession(res, sessionId, { replaceContent: ctx.answer, sessionId, audience: ctx.audience }, "chunk");
       console.log("[/api/chat] no_product_recommendation", {
         sessionId,
@@ -240,25 +247,32 @@ export async function generateAndStreamReply(ctx: ChatPipelineBindings): Promise
       const productHint = getProductHintFromNodes(ctx.resolvedNodes, ctx.extractedProduct);
       const productSlugHint = getProductSlugHintFromNodes(ctx.resolvedNodes, ctx.extractedProduct);
       const recommendation = resolveAmazonRecommendation(ctx.answer, locale, productHint, productSlugHint);
+      const injectAmazon = shouldInjectAmazonSection(ctx.answer, recommendation);
       ctx.analyticsProduct = recommendation.productName;
-      ctx.analyticsAmazonUrl = recommendation.amazonUrl;
+      ctx.analyticsAmazonUrl = injectAmazon ? recommendation.amazonUrl : "";
       const resellers = locale === "pl" ? [] : await ctx.resellerPromise;
       const resellerSection = locale === "pl" ? "" : buildResellerSection(locale, resellers);
-      const amazonSection = recommendation.productName
-        ? buildAmazonSection(locale, recommendation)
-        : buildAmazonSection(locale, { productName: null, amazonUrl: getAmazonDefaultUrl(locale, null) });
       const mistralHadAmazon = hasAmazonSection(ctx.answer);
       const strippedAnswer = removeAmazonSections(ctx.answer);
-      ctx.answer = `${strippedAnswer}\n\n${amazonSection}`.trim();
-      if (!mistralHadAmazon) {
-        sseWriteWithSession(res, sessionId, { delta: `\n\n${amazonSection}`, sessionId, audience: ctx.audience }, "chunk");
+      if (injectAmazon) {
+        const amazonSection = buildAmazonSection(locale, recommendation);
+        ctx.answer = `${strippedAnswer}\n\n${amazonSection}`.trim();
+        if (!mistralHadAmazon) {
+          sseWriteWithSession(res, sessionId, { delta: `\n\n${amazonSection}`, sessionId, audience: ctx.audience }, "chunk");
+        }
+      } else {
+        ctx.answer = strippedAnswer;
+        if (mistralHadAmazon) {
+          sseWriteWithSession(res, sessionId, { replaceContent: ctx.answer, sessionId, audience: ctx.audience }, "chunk");
+        }
       }
       console.log("[/api/chat] amazon_resolution", {
         sessionId,
         extractedProduct: ctx.extractedProduct,
         productHint,
         productSlugHint,
-        finalAmazonUrl: recommendation.amazonUrl,
+        finalAmazonUrl: ctx.analyticsAmazonUrl || null,
+        injectedAmazon: injectAmazon,
         hadAmazonSection: mistralHadAmazon,
         hadFallbackSearchUrl: hasFallbackAmazonSearchUrl(strippedAnswer),
       });

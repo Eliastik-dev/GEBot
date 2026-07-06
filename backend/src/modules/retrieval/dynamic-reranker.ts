@@ -8,6 +8,7 @@
 import type { ExtractedMetadata, Intent } from "./intent-extractor.js";
 import type { ProductTheme } from "../../types/index.js";
 import { isSanitaryFixtureSealingContext } from "../../utils/diagnostic-rules.js";
+import { isHydraulicEcsDiagnosticContext } from "../../utils/fluid-context.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -507,7 +508,28 @@ export function buildEnrichedSearchQuery(
 ): string {
   const lite = options?.lite ?? false;
 
-  if (isSanitaryFixtureSealingContext(baseQuestion) || metadata.intent === "silicone_application") {
+  if (isHydraulicEcsDiagnosticContext(baseQuestion)) {
+    const terms = new Set<string>();
+    const pollutant =
+      /raccord|filetage|ptfe|filasse|pate\s+joint|gebetanche|gebatout|silicone|mastic\s+sanitaire|coupe\s+feu|gebsomousse|piscine|pool|fuite|colmat|patch|joint\s+sanitaire/i;
+    for (const syn of metadata.synonyms) {
+      if (!pollutant.test(syn)) terms.add(syn);
+    }
+    if (/\bodeur\b/i.test(baseQuestion) || /\b(desembou|embouage)\b/i.test(baseQuestion)) {
+      terms.add("desembouant");
+      terms.add("nettoyant circuit");
+    }
+    if (/\b(inhibiteur|g10|g110|g3)\b/i.test(baseQuestion)) {
+      terms.add("inhibiteur");
+    }
+    if (terms.size === 0) return baseQuestion;
+    return `${baseQuestion} ${Array.from(terms).join(" ")}`.trim();
+  }
+
+  if (
+    (isSanitaryFixtureSealingContext(baseQuestion) || metadata.intent === "silicone_application") &&
+    !isHydraulicEcsDiagnosticContext(baseQuestion)
+  ) {
     const terms = new Set<string>(["silicone", "mastic sanitaire", "joint sanitaire"]);
     const pollutant = /raccord|filetage|ptfe|ruban|filasse|pate\s+joint|gebetanche|gebatout|echappement|potable/i;
     for (const syn of metadata.synonyms) {

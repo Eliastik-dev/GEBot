@@ -9,6 +9,7 @@ import {
   extractRecommendedProduct,
 } from "./amazon.js";
 import { extractOriginalUserQuestionFromTranscript } from "./feedback-correction.js";
+import { isNewDiagnosticTurn } from "./fluid-context.js";
 import { hasOngoingConversation, isInformationalProductQuestion, normalizeText } from "./text.js";
 
 export type ConversationTurn = { role: string; content: string };
@@ -63,15 +64,31 @@ export function feedbackEmbeddingText(row: {
 
 const EMBED_SLICE = 1_200;
 
+/** Assistant reply that rejects a product or states nothing in catalogue fits. */
+function isAssistantProductRejection(content: string): boolean {
+  const n = normalizeText(content);
+  if (/\b(aucun\s+(des\s+)?produits?|aucune\s+solution|pas\s+adapte|n\s*est\s+pas\s+adapte|hors\s+catalogue)\b/.test(n)) {
+    return true;
+  }
+  return /^non\b/.test(n.trim()) && /\b(concu|reserve|pas\s+pour|n\s*a\s+aucun\s+role|n\s*est\s+pas)\b/.test(n);
+}
+
+function extractPositiveProductFromAssistant(content: string): string | null {
+  if (isAssistantProductRejection(content)) return null;
+  const fromMode2 = cleanRecommendedProductLabel(extractRecommendedProduct(content));
+  if (fromMode2) return fromMode2;
+  const fromBold = cleanRecommendedProductLabel(extractBoldCatalogProductName(content));
+  if (fromBold) return fromBold;
+  return null;
+}
+
 /** Last catalogue product named in an assistant reply this session (MODE 2 heading or MODE 1 bold name). */
 export function getLastDiscussedProductFromHistory(messages: StoredMessage[]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const row = messages[i];
     if (row?.role !== "assistant") continue;
-    const fromMode2 = cleanRecommendedProductLabel(extractRecommendedProduct(row.content));
-    if (fromMode2) return fromMode2;
-    const fromBold = cleanRecommendedProductLabel(extractBoldCatalogProductName(row.content));
-    if (fromBold) return fromBold;
+    const fromContent = extractPositiveProductFromAssistant(row.content);
+    if (fromContent) return fromContent;
     const fromCtx = row.response_context?.recommended_product?.trim();
     if (fromCtx) {
       const cleaned = cleanRecommendedProductLabel(fromCtx);
@@ -116,22 +133,35 @@ export function isPurchaseAvailabilityQuestion(query: string): boolean {
  */
 export function isProductFollowUpQuestion(query: string, historyMessages: StoredMessage[]): boolean {
   if (!hasOngoingConversation(historyMessages)) return false;
+  if (isNewDiagnosticTurn(query)) return false;
   if (!getLastDiscussedProductFromHistory(historyMessages)) return false;
 
   if (isPurchaseAvailabilityQuestion(query)) return true;
 
-  if (isInformationalProductQuestion(query)) return true;
-
   const q = normalizeText(query);
 
+  if (isInformationalProductQuestion(query)) {
+    const referencesPriorProduct =
+      /\b(ce\s+produit|celui\s*ci|celui\s*la|le\s+meme|deja\s+conseille|que\s+vous\s+avez|que\s+tu\s+as|produit\s+conseille|dont\s+vous\s+parlez)\b/.test(
+        q,
+      );
+    if (referencesPriorProduct) return true;
+  }
+
+  const odorOnPriorProduct =
+    /\bodeur\b/.test(q) && /\b(silicone|mastic|produit|seche|sechage|resine)\b/.test(q);
+
   const followUpSignals =
-    /\b(jaunir|jaunissement|jaune|premium|qualite|meilleur|resiste|resistant|durable|garanti|fongicide|antimoisissure|odeur|seche|secher|temps de sechage|couleur|blanc|transparent|incolore|sans acide|acetique|cartouche|pistolet|format|tube|carton)\b/.test(
-      q,
-    ) ||
+    (odorOnPriorProduct ||
+      /\b(jaunir|jaunissement|jaune|premium|qualite|meilleur|resiste|resistant|durable|garanti|fongicide|antimoisissure|seche|secher|temps de sechage|couleur|blanc|transparent|incolore|sans acide|acetique|cartouche|pistolet|format|tube|carton)\b/.test(
+        q,
+      )) ||
     /\b(est ce|c est|s agit il|compatible|convient il|peut on l|utiliser pour|utilisable|toujours le meme|ce produit|celui ci|celui la|le meme|deja conseille|que vous avez|que tu as|dont vous parlez)\b/.test(
       q,
     ) ||
-    /\b(pourquoi|comment|combien de temps|quelle difference|comparer)\b/.test(q);
+    /\b(pourquoi|combien de temps|quelle difference|comparer)\b/.test(q) ||
+    (/\bcomment\b/.test(q) &&
+      /\b(ce\s+produit|utiliser|appliquer|poser|produit)\b/.test(q));
 
   const isNewRecommendationRequest =
     /\b(recommand|conseill|suggere|propose|quelle? (colle|mastic|silicone|produit)|quel (colle|mastic|silicone|produit)|cherche|besoin d)\b/.test(

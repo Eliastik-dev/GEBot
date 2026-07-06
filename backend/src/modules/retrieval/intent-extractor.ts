@@ -79,6 +79,14 @@ import {
   isPersonalDrinkwareOutOfCatalog,
   isSanitaryFixtureSealingContext,
 } from "../../utils/diagnostic-rules.js";
+import {
+  getHydraulicEcsMissingClarificationParams,
+  hasHydraulicPressureIssueContext,
+  hasNegatedLeakInText,
+  isGasHeatingEquipmentContext,
+  isHydraulicEcsDiagnosticContext,
+  isTransportedGasContext,
+} from "../../utils/fluid-context.js";
 import { mentionsLikelyProductPhrase } from "../../utils/product-mention.js";
 
 function normalizeExtractionText(value: string): string {
@@ -171,10 +179,9 @@ function leakRequiresPressureContext(
   if (mentionsLikelyProductPhrase(conversationText)) return false;
   const t = normalizeExtractionText(conversationText);
   return (
-    merged.safety_keywords.includes("gas") ||
-    merged.fluid === "gaz" ||
-    SAFETY_PATTERNS.fluid_gas.test(t) ||
-    /\b(gpl|butane|propane)\b/.test(t)
+    (merged.safety_keywords.includes("gas") && isTransportedGasContext(conversationText)) ||
+    (merged.fluid === "gaz" && isTransportedGasContext(conversationText)) ||
+    (isTransportedGasContext(conversationText) && /\b(gpl|butane|propane)\b/.test(t))
   );
 }
 
@@ -293,7 +300,8 @@ function regexFallbackExtraction(transcript: string, currentMessage: string): Ex
   const isAutomotiveExhaust = /\b(echappement|pot[\s-]?d['']?echappement|catalyseur|collecteur|silencieux)\b/.test(fullText);
   // Check heating FIRST (more specific: "chauffage à eau" should be "chauffage", not "eau")
   if (!isWoodStoveCosmeticCareContext(fullText) && SAFETY_PATTERNS.fluid_heating.test(fullText)) fluid = "chauffage";
-  else if (SAFETY_PATTERNS.fluid_gas.test(fullText)) fluid = "gaz";
+  else if (isGasHeatingEquipmentContext(fullText)) fluid = "chauffage";
+  else if (SAFETY_PATTERNS.fluid_gas.test(fullText) && isTransportedGasContext(fullText)) fluid = "gaz";
   else if (SAFETY_PATTERNS.fluid_water.test(fullText) && !isAutomotiveExhaust) fluid = "eau";
   else if (hasLeak && /\b(robinet|mousseur|mitigeur|lavabo|evier|bec|aerateur)\b/.test(fullText)) fluid = "eau";
 
@@ -306,7 +314,7 @@ function regexFallbackExtraction(transcript: string, currentMessage: string): Ex
   else if (/sans\s+pression|gravitaire/.test(fullText)) pressure = "gravity";
 
   const safety_keywords: string[] = [];
-  if (SAFETY_PATTERNS.gas.test(fullText)) safety_keywords.push("gas");
+  if (SAFETY_PATTERNS.gas.test(fullText) && isTransportedGasContext(fullText)) safety_keywords.push("gas");
   if (hasLeak) safety_keywords.push("leak");
   if (hasPipeDamage) safety_keywords.push("pipe_damage");
 
@@ -672,6 +680,73 @@ function applyHeatingCircuitSanitizer(merged: ExtractedMetadata, conversationTex
   ];
 }
 
+function applyHydraulicEcsClarificationEnrichment(merged: ExtractedMetadata, conversationText: string): void {
+  if (!isHydraulicEcsDiagnosticContext(conversationText)) return;
+  merged.missing_params = merged.missing_params.filter(
+    (p) => !["joint_service_fluid", "diameter", "pressure", "fluid"].includes(p),
+  );
+  for (const param of getHydraulicEcsMissingClarificationParams(conversationText)) {
+    if (!merged.missing_params.includes(param)) merged.missing_params.push(param);
+  }
+  merged.needs_clarification = merged.missing_params.length > 0;
+}
+
+function applyHydraulicPressureSanitizer(merged: ExtractedMetadata, conversationText: string): void {
+  const leakLike: Intent[] = ["leak_repair", "pipe_repair", "inaccessible_leak", "silicone_application"];
+  if (leakLike.includes(merged.intent) || merged.intent === "sealing_assembly") {
+    merged.intent = "general_technical";
+    merged.confidence = Math.max(merged.confidence, 0.7);
+  }
+  merged.damage_type = null;
+  merged.missing_params = merged.missing_params.filter(
+    (p) => !["joint_service_fluid", "diameter", "pressure"].includes(p),
+  );
+  merged.needs_clarification = merged.missing_params.length > 0;
+
+  const pollutant =
+    /fuite|colmat|patch|gebetanche|pate\s+joint|filasse|ptfe|ruban|resine|filetage|gebsomousse|coupe\s+feu|silicone\s+sanitaire/i;
+  merged.synonyms = merged.synonyms.filter((s) => !pollutant.test(s));
+
+  const t = normalizeExtractionText(conversationText);
+  if (!merged.fluid && /\b(eau\s+chaude|ecs|sanitaire|robinet)\b/.test(t)) {
+    merged.fluid = "eau";
+  }
+  if (/\b(chaudiere|desembou|embouage|odeur|cumulus|ballon)\b/.test(t)) {
+    merged.fluid = "chauffage";
+    merged.synonyms = [
+      ...new Set([...merged.synonyms, ...buildSynonyms(merged.intent, "chauffage", merged.material)]),
+    ];
+  }
+}
+
+function applyGasEquipmentSanitizer(merged: ExtractedMetadata, conversationText: string): void {
+  merged.safety_keywords = merged.safety_keywords.filter((k) => k !== "gas");
+  if (merged.fluid === "gaz") {
+    merged.fluid = /\b(desembou|embouage|radiateur|circuit)\b/.test(normalizeExtractionText(conversationText))
+      ? "chauffage"
+      : "eau";
+  }
+  merged.synonyms = merged.synonyms.filter((s) => !/gaz naturel|gpl|gaz de ville/i.test(s));
+
+  const leakLike: Intent[] = ["leak_repair", "pipe_repair", "inaccessible_leak"];
+  if (leakLike.includes(merged.intent)) {
+    merged.intent = "general_technical";
+    merged.damage_type = null;
+  }
+}
+
+function applyLeakNegationSanitizer(merged: ExtractedMetadata, conversationText: string): void {
+  const leakLike: Intent[] = ["leak_repair", "pipe_repair", "inaccessible_leak"];
+  if (leakLike.includes(merged.intent)) {
+    merged.intent = "general_technical";
+    merged.confidence = Math.max(merged.confidence, 0.7);
+  }
+  merged.damage_type = null;
+  merged.missing_params = merged.missing_params.filter((p) => !["fluid", "pressure", "diameter"].includes(p));
+  merged.synonyms = merged.synonyms.filter((s) => !/fuite|colmat|leak|patch/i.test(s));
+  merged.needs_clarification = merged.missing_params.length > 0;
+}
+
 function applyJointServiceFluidAndNonLeakSanitizer(
   merged: ExtractedMetadata,
   transcript: string,
@@ -786,6 +861,17 @@ export async function runDiagnosticAnalysis(
     !descalingContext &&
     hasHeatingCircuitContext(conversationText) &&
     !hasObviousLeakOrPipeDamageIntent(conversationText);
+  const hydraulicPressureContext =
+    !drinkwareOutOfCatalog &&
+    !woodStoveCosmeticContext &&
+    !descalingContext &&
+    !heatingCircuitContext &&
+    hasHydraulicPressureIssueContext(conversationText) &&
+    !hasObviousLeakOrPipeDamageIntent(conversationText);
+  const gasEquipmentContext =
+    !drinkwareOutOfCatalog &&
+    isGasHeatingEquipmentContext(conversationText) &&
+    !isTransportedGasContext(conversationText);
 
   if (!llmResult) {
     const m: ExtractedMetadata = { ...fallback };
@@ -821,6 +907,27 @@ export async function runDiagnosticAnalysis(
     }
     if (heatingCircuitContext) {
       applyHeatingCircuitSanitizer(m, conversationText);
+      if (hasNegatedLeakInText(conversationText)) applyLeakNegationSanitizer(m, conversationText);
+      applyHydraulicEcsClarificationEnrichment(m, conversationText);
+      return {
+        metadata: m,
+        clarification_message: m.needs_clarification ? buildClarificationFromMetadata(m, locale) : null,
+      };
+    }
+    if (hydraulicPressureContext) {
+      applyHydraulicPressureSanitizer(m, conversationText);
+      if (hasNegatedLeakInText(conversationText)) applyLeakNegationSanitizer(m, conversationText);
+      if (gasEquipmentContext) applyGasEquipmentSanitizer(m, conversationText);
+      applyHydraulicEcsClarificationEnrichment(m, conversationText);
+      return {
+        metadata: m,
+        clarification_message: m.needs_clarification ? buildClarificationFromMetadata(m, locale) : null,
+      };
+    }
+    if (gasEquipmentContext) {
+      applyGasEquipmentSanitizer(m, conversationText);
+      if (hasNegatedLeakInText(conversationText)) applyLeakNegationSanitizer(m, conversationText);
+      applyHydraulicEcsClarificationEnrichment(m, conversationText);
       return {
         metadata: m,
         clarification_message: m.needs_clarification ? buildClarificationFromMetadata(m, locale) : null,
@@ -867,13 +974,19 @@ export async function runDiagnosticAnalysis(
   }
 
   // Safety override: if regex detects gas/leak and LLM missed it, force it
-  if (fallback.safety_keywords.includes("gas") && !merged.safety_keywords.includes("gas")) {
+  if (
+    fallback.safety_keywords.includes("gas") &&
+    !merged.safety_keywords.includes("gas") &&
+    isTransportedGasContext(conversationText)
+  ) {
     merged.safety_keywords.push("gas");
   }
   if (
     !drinkwareOutOfCatalog &&
     !descalingContext &&
     !heatingCircuitContext &&
+    !hydraulicPressureContext &&
+    !hasNegatedLeakInText(conversationText) &&
     fallback.intent === "leak_repair" &&
     merged.intent === "general_technical"
   ) {
@@ -913,6 +1026,14 @@ export async function runDiagnosticAnalysis(
     applyDescalingSanitizer(merged, conversationText);
   } else if (heatingCircuitContext) {
     applyHeatingCircuitSanitizer(merged, conversationText);
+    if (hasNegatedLeakInText(conversationText)) applyLeakNegationSanitizer(merged, conversationText);
+  } else if (hydraulicPressureContext) {
+    applyHydraulicPressureSanitizer(merged, conversationText);
+    if (hasNegatedLeakInText(conversationText)) applyLeakNegationSanitizer(merged, conversationText);
+    if (gasEquipmentContext) applyGasEquipmentSanitizer(merged, conversationText);
+  } else if (gasEquipmentContext) {
+    applyGasEquipmentSanitizer(merged, conversationText);
+    if (hasNegatedLeakInText(conversationText)) applyLeakNegationSanitizer(merged, conversationText);
   } else {
     applyBuildingEnvelopeLeakEnrichment(merged, conversationText);
     const isLeakLike = ["leak_repair", "pipe_repair", "inaccessible_leak"].includes(merged.intent);
@@ -935,6 +1056,10 @@ export async function runDiagnosticAnalysis(
       );
       merged.needs_clarification = merged.missing_params.length > 0;
     }
+  }
+
+  if (!drinkwareOutOfCatalog) {
+    applyHydraulicEcsClarificationEnrichment(merged, conversationText);
   }
 
   return {
@@ -973,6 +1098,18 @@ const CLARIFICATION_TEMPLATES: L = {
     en: "- **Fluid contacting the seal**: potable water, sanitary waste / drained or pressurized, glycol / closed heating circuit, hydrocarbons, gas (natural, LPG…)?",
     nl: "- **Medium dat de afdichting raakt**: drinkwater, afvalwater/riolering, glycol/gesloten verwarmingscircuit, koolwaterstoffen, gas (aardgas, LPG…)?",
     pl: "- **Medium w kontakcie z uszczelnieniem**: woda pitna, ścieki kanalizacyjne, glikol / obieg zamknięty CO, węglowodory, gaz (LPG)?",
+  },
+  ecs_equipment: {
+    fr: "- **Production d'eau chaude** : chaudière gaz, ballon électrique / cumulus, chauffe-eau instantané, autre ?",
+    en: "- **Hot water source**: gas boiler, electric tank / cumulus, instantaneous heater, other?",
+    nl: "- **Warmwaterproductie**: gasketel, elektrische boiler / cumulus, doorstroomverwarmer, anders?",
+    pl: "- **Źródło c.w.u.**: kocioł gazowy, bojler elektryczny / cumulus, podgrzewacz przepływowy, inne?",
+  },
+  ecs_pressure_scope: {
+    fr: "- **Portée du symptôme** : tous les robinets ECS, un seul point de puisage, l'eau froide est-elle normale ?",
+    en: "- **Symptom scope**: all hot taps, a single outlet, is cold water pressure normal?",
+    nl: "- **Omvang van het symptoom**: alle warmwaterkranen, één aftappunt, is koud water normaal?",
+    pl: "- **Zakres objawu**: wszystkie baterie c.w.u., jeden punkt poboru, czy zimna woda ma normalne ciśnienie?",
   },
 };
 

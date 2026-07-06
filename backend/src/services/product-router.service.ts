@@ -29,6 +29,7 @@ import {
   inferCatalogProductAudience,
   normalizeStoredProductTheme,
 } from "./product-theme.service.js";
+import { isHydraulicEcsDiagnosticContext } from "../utils/fluid-context.js";
 
 export type ProductRouterInput = {
   locale: string;
@@ -60,6 +61,15 @@ export function resolveUseCaseTags(input: ProductRouterInput): string[] {
   const tags = new Set<string>();
   const q = normalizeText(combinedText);
   const { metadata, theme } = input;
+
+  if (isHydraulicEcsDiagnosticContext(combinedText)) {
+    tags.add("chauffage");
+    if (/\b(desembou|embouage|odeur|inhibiteur|\bg3\b|\bg10\b|\bg110\b)\b/.test(q)) {
+      tags.add("desembouage");
+    }
+    return [...tags];
+  }
+
   const pasteJoint = asksMetalThreadPasteJoint(combinedText);
   const threadedSealing = asksThreadedMetalSealing(combinedText);
   const parsedJointFluid = parseJointServiceFluid(combinedText);

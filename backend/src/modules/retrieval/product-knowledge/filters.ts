@@ -5,7 +5,17 @@ import {
   isSanitaryFixtureSealingContext,
   isThreadPasteOrPlumbingInternalSlug,
 } from "../../../utils/diagnostic-rules.js";
+import { hasNegatedLeakInText, isHydraulicEcsDiagnosticContext } from "../../../utils/fluid-context.js";
 import { normalizeText } from "./types.js";
+
+function isOffTopicSlugForHydraulicEcsDiagnostics(slug: string, title: string): boolean {
+  const combined = normalizeText(`${slug} ${title}`);
+  return (
+    /gebsomousse|coupe\s*feu|intumescent/.test(combined) ||
+    /\b(pool|piscine|liner|skimmer|colmateur)\b/.test(combined) ||
+    /\b(echappement|collex|retouche\s+email)\b/.test(combined)
+  );
+}
 
 export function slugMatchesPenalty(slug: string, penalizeSlugs: string[]): boolean {
   const norm = normalizeText(slug);
@@ -41,6 +51,16 @@ export function filterProductKnowledgeByQueryContext(
       const t = normalizeText(p.canonical_name);
       if (s.includes("echappement") || s.includes("collex") || t.includes("echappement")) return false;
       if (isThreadPasteOrPlumbingInternalSlug(p.slug, p.canonical_name)) return false;
+      return true;
+    });
+    if (next.length > 0) filtered = next;
+  }
+  if (isHydraulicEcsDiagnosticContext(q)) {
+    const next = filtered.filter((p) => {
+      if (isOffTopicSlugForHydraulicEcsDiagnostics(p.slug, p.canonical_name)) return false;
+      if (hasNegatedLeakInText(q) && isThreadPasteOrPlumbingInternalSlug(p.slug, p.canonical_name)) {
+        return false;
+      }
       return true;
     });
     if (next.length > 0) filtered = next;

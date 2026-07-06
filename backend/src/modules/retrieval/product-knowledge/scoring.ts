@@ -13,6 +13,7 @@ import {
   isSanitaryFixtureSealingContext,
   isThreadPasteOrPlumbingInternalSlug,
 } from "../../../utils/diagnostic-rules.js";
+import { hasNegatedLeakInText, isHydraulicEcsDiagnosticContext } from "../../../utils/fluid-context.js";
 import { inferCatalogProductAudience } from "../../../services/product-theme.service.js";
 import { decodeHtmlEntities } from "../../../utils/text.js";
 import {
@@ -186,6 +187,18 @@ export function scoreProduct(
     if (slug.includes("collafeu") || title.includes("collafeu") || title.includes("propfeu")) score -= 45;
     if (title.includes("refractaire") || slug.includes("cheminee")) score -= 35;
     if (/\buniversel\b/.test(q) && (slug.includes("g110") || title.includes("universel"))) score += 18;
+  }
+
+  if (isHydraulicEcsDiagnosticContext(q)) {
+    if (slug.includes("desembou") || title.includes("desembou") || slug.includes("g3")) score += 22;
+    if (title.includes("inhibiteur")) score += 14;
+    if (slug.includes("gebsomousse") || title.includes("coupe feu") || title.includes("intumescent")) {
+      score -= 55;
+    }
+    if (slug.includes("pool") || slug.includes("piscine") || slug.includes("liner")) score -= 50;
+    if (hasNegatedLeakInText(q) && isThreadPasteOrPlumbingInternalSlug(slug, product.canonical_name)) {
+      score -= 35;
+    }
   }
 
   if (explicitScore >= EXPLICIT_PRODUCT_NAME_PRIORITY_MIN) score += explicitScore;

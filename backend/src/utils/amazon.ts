@@ -17,6 +17,19 @@ export function getAmazonDefaultUrl(locale: Locale, productName?: string | null)
   return `${base}${encodeURIComponent(keyword)}`;
 }
 
+/** Generic Amazon search fallback — not a direct product (/dp/) link. */
+export function isGenericAmazonSearchUrl(url: string): boolean {
+  return /https?:\/\/www\.amazon\.(?:fr|nl)\/s\?k=/i.test(url.trim());
+}
+
+/** Inject Amazon block only when a real catalogue product with a mapped or ref link exists. */
+export function shouldInjectAmazonSection(answer: string, recommendation: RecommendationDetails): boolean {
+  if (!hasValidRecommendedProduct(answer)) return false;
+  if (!recommendation.productName) return false;
+  if (!recommendation.amazonUrl) return false;
+  return !isGenericAmazonSearchUrl(recommendation.amazonUrl);
+}
+
 function expandSearchTokens(tokens: string[]): string[] {
   const out = new Set(tokens);
   if (tokens.includes("silicone") && (tokens.includes("bain") || tokens.includes("cuisine") || tokens.includes("sanitaire"))) {
@@ -289,6 +302,8 @@ export function isNonProductLabel(value: string | null): boolean {
     normalized.includes("sorry") ||
     normalized.includes("aucune") ||
     normalized.includes("aucun produit") ||
+    normalized.includes("aucun des produits") ||
+    normalized.includes("n est pas adapte") ||
     normalized.includes("pas de produit") ||
     normalized.includes("no suitable product") ||
     normalized.includes("no product in context") ||

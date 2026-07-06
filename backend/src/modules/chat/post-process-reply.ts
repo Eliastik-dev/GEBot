@@ -131,7 +131,7 @@ export async function postProcessReply(ctx: ChatPipelineBindings): Promise<void>
         ...(ctx.analyticsProduct ? { recommended_product: ctx.analyticsProduct } : {}),
       },
     });
-    ctx.problemClassification = await classifyProblemTypeWithLlm(ctx.searchQuery, locale);
+    ctx.problemClassification = await classifyProblemTypeWithLlm(message, locale);
 
     // ÔöÇÔöÇ LLM-as-a-Judge (fire-and-forget background evaluation) ÔöÇÔöÇ
     if (ctx.assistantMsgId) {

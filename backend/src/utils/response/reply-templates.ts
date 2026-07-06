@@ -5,6 +5,7 @@ import { formatUserFacingMismatchNote, normalizeStoredProductTheme } from "../..
 import { removeAmazonSections, hasValidRecommendedProduct } from "../amazon.js";
 import { detectTheme } from "../locale.js";
 import { isBuildingSurfaceSealingContext } from "../diagnostic-rules.js";
+import { isHydraulicEcsDiagnosticContext } from "../fluid-context.js";
 import { asksMetalThreadPasteJoint } from "../joint-paste.js";
 import { decodeHtmlEntities, normalizeText } from "../text.js";
 
@@ -587,6 +588,7 @@ export function buildMoreDetailsForProductRequest(
   const isPro = audience === "professional";
   const normalized = message ? normalizeText(message) : "";
   const theme = message ? detectTheme(message) : null;
+  const isEcsPressure = message ? isHydraulicEcsDiagnosticContext(message) : false;
   const isFaucet =
     /\b(robinet|mousseur|mitigeur|bec|cartouche|perlateur|tap|faucet|aerator)\b/.test(normalized);
   const isRoofOrBuilding =
@@ -595,6 +597,23 @@ export function buildMoreDetailsForProductRequest(
   const isPool = theme === "piscine" || /\b(piscine|liner|bassin|pool)\b/.test(normalized);
   const isPipe =
     /\b(tuyau|canalisation|tube|raccord|pipe|pvc|evacuation)\b/.test(normalized) && !isFaucet;
+
+  if (isEcsPressure) {
+    if (locale === "en") {
+      return isPro
+        ? "### 💡 To narrow down the ECS diagnosis\nPlease specify:\n- **Hot water source** (gas boiler, electric tank, instantaneous heater)\n- **Scope** (all hot taps vs one outlet; is cold water pressure normal?)\n- **Other symptoms** (odor, recent maintenance, error code on boiler)\n- Whether a **professional** has already checked the installation"
+        : "### 💡 To narrow down the ECS diagnosis\nPlease specify:\n- **Equipment** producing hot water (gas boiler, cumulus, etc.)\n- **All hot taps** affected or just one?\n- Is **cold water** pressure normal?\n- Any **odor** or recent work on the boiler?";
+    }
+    if (locale === "nl") {
+      return "### 💡 Meer details voor ECS-diagnose\n- **Warmwaterbron** (gasketel, boiler, doorstroom)\n- **Alle warmwaterkranen** of één punt?\n- Is **koud water** normaal?\n- **Geur** of recent onderhoud?";
+    }
+    if (locale === "pl") {
+      return "### 💡 Wiecej szczegolow diagnostyki c.w.u.\n- **Zrodlo c.w.u.** (kociol gazowy, bojler)\n- **Wszystkie baterie** c.w.u. czy jedna?\n- Czy **zimna woda** ma normalne cisnienie?\n- **Zapach** lub niedawna konserwacja?";
+    }
+    return isPro
+      ? "### 💡 Pour affiner le diagnostic ECS\nMerci de préciser :\n- **Production ECS** (chaudière gaz, ballon électrique, chauffe-eau instantané)\n- **Portée** : tous les robinets ECS ou un seul ? L'eau froide est-elle normale ?\n- **Autres signes** (odeur, entretien récent, code erreur chaudière)\n- Intervention d'un **professionnel** déjà réalisée ou non"
+      : "### 💡 Pour affiner le diagnostic ECS\nMerci de préciser :\n- **Équipement** qui produit l'eau chaude (chaudière gaz, cumulus, etc.)\n- **Tous les robinets** ECS sont-ils concernés ou un seul ?\n- L'**eau froide** a-t-elle une pression normale ?\n- Une **odeur** ou des travaux récents sur la chaudière ?";
+  }
 
   if (locale === "en") {
     if (isFaucet) {

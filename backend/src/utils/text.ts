@@ -1,5 +1,6 @@
 import { NO_CONTEXT_FALLBACK, NO_MATCH_USAGE_FALLBACK } from "../config/constants.js";
 import type { Locale, StoredMessage, Audience } from "../types/index.js";
+import { isGasHeatingEquipmentContext, isTransportedGasContext } from "./fluid-context.js";
 
 export function decodeHtmlEntities(value: string): string {
   return value
@@ -9,7 +10,9 @@ export function decodeHtmlEntities(value: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'");
+    .replace(/&apos;/g, "'")
+    .replace(/&rsquo;/gi, "'")
+    .replace(/&nbsp;/g, " ");
 }
 
 export function normalizeText(value: string): string {
@@ -58,7 +61,8 @@ export function extractFluid(raw: string): string | null {
   // Check specific/compound fluids first to avoid "chauffage à eau" → "eau"
   if (/\b(chauffage|radiateur|circuit\s+chauffage|caloporteur)\b/.test(m)) return "chauffage";
   if (/\b(fioul|huile|oil)\b/.test(m)) return "huile";
-  if (/\b(gaz|gas)\b/.test(m)) return "gaz";
+  if (isGasHeatingEquipmentContext(m)) return "chauffage";
+  if (/\b(gaz|gas)\b/.test(m) && isTransportedGasContext(m)) return "gaz";
   // For "eau": skip if context is about building surfaces (rain infiltration into tiles is not a pipe fluid)
   const isSurfaceContext = /\b(carrelage|terrasse|facade|dalle|toiture|toit|mur|pierre|brique)\b/.test(m);
   const isPlumbingWater = /\b(tuyau|canalisation|raccord|robinet|conduit|evacuation|egout|wc|sanitaire|potable)\b/.test(m);

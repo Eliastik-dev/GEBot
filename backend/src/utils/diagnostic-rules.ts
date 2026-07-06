@@ -36,6 +36,12 @@ export function hasHeatingCircuitContext(text: string): boolean {
   const n = normalizeText(text);
   if (hasDescalingContext(text)) return false;
   if (isWoodStoveCosmeticCareContext(text)) return false;
+  if (
+    /\b(chaudiere|cumulus|ballon)\b/.test(n) &&
+    /\b(eau\s+chaude|ecs|sanitaire|robinet|pression|odeur|desembou|embouage|entretien)\b/.test(n)
+  ) {
+    return true;
+  }
   return (
     /\b(desembou|embouage|inhibiteur|\bg3\b|\bg10\b|\bg70\b|\bg110\b|radiateur|plancher\s+chauffant|plancher\s+chauf|chauffage\s+central|circuit\s+(de\s+)?chauff|circuit\s+ferm|caloporteur|\bglycol\b|neutralisant|nettoyant\s+circuit)\b/.test(
       n,
@@ -95,7 +101,7 @@ export function isThreadPasteOrPlumbingInternalSlug(slug: string, title = ""): b
   const t = normalizeText(title);
   const combined = `${s} ${t}`;
   return (
-    /\b(gebatout|pate\s+a\s+joint|pate\s+joint|filasse|ptfe|olifan|echappement|collex|gebsoplast|resine\s+detancheite|resine\s+d\s+etancheite)\b/.test(
+    /\b(gebatout|gebetanche|pate\s+a\s+joint|pate\s+joint|filasse|ptfe|olifan|echappement|collex|gebsoplast|resine\s+detancheite|resine\s+d\s+etancheite)\b/.test(
       combined,
     ) || (/\bfiletage\b/.test(combined) && !/\b(sanitaire|baignoire|douche)\b/.test(combined))
   );

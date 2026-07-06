@@ -300,8 +300,17 @@ ${history || "(aucun historique)"}`
 
 export function detectProblemType(query: string): string {
   const q = normalizeText(query);
+  const negatedLeak = /\b(pas\s+de\s+fuite|sans\s+fuite|aucune\s+fuite|no\s+leak)\b/.test(q);
+  const ecsPressure =
+    /\b(pression|debit|manque\s+d[\s']?eau|perte\s+de\s+pression|peu\s+de\s+pression)\b/.test(q) &&
+    /\b(eau\s+chaude|ecs|robinet|chaudiere|cumulus|sanitaire)\b/.test(q);
+  if (ecsPressure && (!/\b(fuite|leak|lek)\b/.test(q) || negatedLeak)) {
+    return "ecs_pressure_issue";
+  }
   if (q.includes("bypass")) return "bypass_issue";
-  if (q.includes("fuite") || q.includes("lek") || q.includes("leak") || q.includes("wyciek")) return "leak_issue";
+  if (!negatedLeak && (q.includes("fuite") || q.includes("lek") || q.includes("leak") || q.includes("wyciek"))) {
+    return "leak_issue";
+  }
   if (q.includes("joint") || q.includes("seal") || q.includes("uszczeln")) return "sealing_issue";
   if (q.includes("silicone") || q.includes("mastic")) return "silicone_application";
   return "general_technical";

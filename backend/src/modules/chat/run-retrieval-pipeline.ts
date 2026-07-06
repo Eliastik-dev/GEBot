@@ -649,7 +649,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       );
     if (ctx.cached && ctx.cached.expiresAt > Date.now() && !ctx.cachedContainsDeprecatedStoreLink) {
       const recommendation = resolveAmazonRecommendation(ctx.cached.value, locale);
-      const productType = await classifyProblemTypeWithLlm(ctx.searchQuery, locale);
+      const productType = await classifyProblemTypeWithLlm(message, locale);
       startSse(res);
       sseWriteWithSession(res, sessionId, { delta: ctx.cached.value, sessionId, audience: ctx.audience }, "chunk");
       await saveMessage(sessionId, "assistant", ctx.cached.value);
@@ -1021,17 +1021,13 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
       const noContextReply = buildNoContextFallback(locale, ctx.queryForRetrieval, ctx.fluid);
       const resellers = locale === "pl" ? [] : await ctx.resellerPromise;
       const resellerSection = locale === "pl" ? "" : buildResellerSection(locale, resellers);
-      const amazonSection = buildAmazonSection(locale, {
-        productName: null,
-        amazonUrl: getAmazonDefaultUrl(locale, null),
-      });
       const escalationSection = buildEscalationSection(locale, ctx.audience);
-      const noContextResponse = [noContextReply, amazonSection, resellerSection, escalationSection].filter(Boolean).join("\n\n");
+      const noContextResponse = [noContextReply, resellerSection, escalationSection].filter(Boolean).join("\n\n");
       const noContextHandoff = buildHandoff(locale, ctx.audience);
       startSse(res);
       sseWriteWithSession(res, sessionId, { delta: noContextResponse, sessionId, audience: ctx.audience }, "chunk");
       await saveMessage(sessionId, "assistant", noContextResponse);
-      const noContextClassification = await classifyProblemTypeWithLlm(ctx.searchQuery, locale);
+      const noContextClassification = await classifyProblemTypeWithLlm(message, locale);
       fireAndForget(
         logQuery({
           sessionId,
@@ -1051,7 +1047,7 @@ export async function runRetrievalPipeline(ctx: ChatPipelineBindings): Promise<v
           audience: ctx.audience,
           query: ctx.searchQuery,
           recommendedProduct: null,
-          amazonUrl: getAmazonDefaultUrl(locale, null),
+          amazonUrl: "",
           problemType: noContextClassification.problemType,
           status: "no_context",
         }),
